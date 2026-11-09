@@ -17,6 +17,7 @@ const skyFrag = /* glsl */ `
   uniform vec3 sunDir;
   uniform vec3 fogCol;
   uniform float time;
+  uniform float sunStrength;
   varying vec3 vDir;
 
   float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
@@ -48,7 +49,7 @@ const skyFrag = /* glsl */ `
       float gap = (0.55 - t) * 1.1;
       float on = t > 0.55 ? 1.0 : step(gap, band);
       float edge = smoothstep(r, r - 0.006, a);
-      col = mix(col, sc * 2.4, on * edge);
+      col = mix(col, sc * sunStrength, on * edge);
     }
     gl_FragColor = vec4(col, 1.0);
   }
@@ -93,7 +94,7 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, tr
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: skyVert,
     fragmentShader: skyFrag,
-    uniforms: { sunDir: { value: SUN_DIR }, fogCol: { value: FOG_COLOR }, time: { value: 0 } },
+    uniforms: { sunDir: { value: SUN_DIR }, fogCol: { value: FOG_COLOR }, time: { value: 0 }, sunStrength: { value: 2.4 } },
     side: THREE.BackSide,
     depthWrite: false,
     toneMapped: false,
@@ -106,13 +107,17 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, tr
   // environment map from the sky so metal & wet road reflect the neon horizon
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
-  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), skyMat));
+  // dimmed sun in reflections, otherwise metal surfaces facing it blow out under bloom
+  const envMat = skyMat.clone();
+  envMat.uniforms.sunStrength.value = 0.5;
+  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), envMat));
   scene.environment = pmrem.fromScene(envScene, 0.02).texture;
-  scene.environmentIntensity = 0.9;
+  scene.environmentIntensity = 0.7;
+  envMat.dispose();
 
   // ---- lights ----
   scene.add(new THREE.HemisphereLight(0x7a44ff, 0x14001f, 0.7));
-  const sun = new THREE.DirectionalLight(0xff6fb0, 1.4);
+  const sun = new THREE.DirectionalLight(0xff6fb0, 0.35);
   sun.position.copy(SUN_DIR).multiplyScalar(500);
   scene.add(sun);
 

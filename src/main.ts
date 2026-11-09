@@ -11,6 +11,7 @@ import { Hud, fmt } from './hud';
 import { AudioFx } from './audio';
 import { Ghost } from './ghost';
 import { Particles, Trail } from './fx';
+import { autopilot } from './ai';
 
 const LAPS = 3;
 const START_IDX = 10;
@@ -34,14 +35,14 @@ ghost.index(track);
 const hud = new Hud(track);
 const audio = new AudioFx();
 const particles = new Particles(scene);
-const trailColor = new THREE.Color(0x22f3ff).multiplyScalar(2.2);
-const trails = [new Trail(scene, trailColor), new Trail(scene, trailColor)];
+const trailColor = new THREE.Color(0x22f3ff).multiplyScalar(1.6);
+const trails = [new Trail(scene, trailColor, 40, 0.11), new Trail(scene, trailColor, 40, 0.11)];
 const carLight = new THREE.PointLight(0x22f3ff, 60, 20, 2);
 scene.add(carLight);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.95, 0.55, 0.6);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.75, 0.5, 0.72);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -65,7 +66,9 @@ let passedHalf = false;
 let prevIdx = START_IDX;
 let shake = 0;
 
-const IDLE: Controls = { throttle: 0, brake: 0, steer: 0, drift: false, start: false, restart: false, mute: false };
+const debug = { autopilot: false };
+const QUIET: CarEvents = { onBoost() {}, onImpact() {} };
+const IDLE: Controls ={ throttle: 0, brake: 0, steer: 0, drift: false, start: false, restart: false, mute: false };
 const TIER_COLORS = [0xf4ecff, 0x22f3ff, 0xff2bd6, 0xffd23f].map((c) => new THREE.Color(c).multiplyScalar(2.5));
 const SPARK = new THREE.Color(0xffc040).multiplyScalar(3);
 
@@ -152,8 +155,11 @@ function snapCamera() {
 
 function updateCamera(dt: number, time: number) {
   if (state === 'menu') {
-    const a = time * 0.22;
-    camera.position.set(car.pos.x + Math.sin(a) * 13, 3.2 + Math.sin(time * 0.4) * 0.8, car.pos.z + Math.cos(a) * 13);
+    // slow cinematic orbit around the attract-mode car
+    const a = time * 0.18;
+    tmp.set(car.pos.x + Math.sin(a) * 14, 3 + Math.sin(time * 0.4) * 1.2, car.pos.z + Math.cos(a) * 14);
+    camPos.lerp(tmp, 1 - Math.exp(-3 * dt));
+    camera.position.copy(camPos);
     camera.lookAt(car.pos.x, 1.2, car.pos.z);
     camera.fov = 55;
     camera.updateProjectionMatrix();
@@ -188,7 +194,7 @@ function updateEffects(dt: number) {
   right.set(-Math.cos(h), 0, Math.sin(h));
   fwd.set(Math.sin(h), 0, Math.cos(h));
   const root = car.model.root;
-  const intensity = THREE.MathUtils.clamp((car.speed - 8) / 50, 0, 1) * (1 + car.boost);
+  const intensity = THREE.MathUtils.clamp((car.speed - 8) / 50, 0, 1) * (0.7 + car.boost * 0.8);
 
   car.model.thrusterLocal.forEach((local, i) => {
     tmp.copy(local);
@@ -213,7 +219,7 @@ function updateEffects(dt: number) {
   particles.update(dt);
 
   carLight.position.set(car.pos.x, 1.2, car.pos.z);
-  carLight.intensity = 50 + car.boost * 80;
+  carLight.intensity = 22 + car.boost * 50;
 }
 
 // ---------------------------------------------------------------- loop
@@ -225,7 +231,8 @@ let time = 0;
 
 function frame(now: number) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000);
+  // rAF timestamps can precede `last` on the first frame; never let dt go negative
+  const dt = THREE.MathUtils.clamp((now - last) / 1000, 0, 0.05);
   last = now;
   time += dt;
 
@@ -255,7 +262,10 @@ function frame(now: number) {
   }
 
   const driving = state === 'racing' || state === 'finished';
-  car.update(dt, driving ? c : IDLE, track, events);
+  const input = state === 'menu' || (driving && debug.autopilot)
+    ? autopilot(car, track, state === 'menu' ? 0.8 : 1)
+    : driving ? c : IDLE;
+  car.update(dt, input, track, state === 'menu' ? QUIET : events);
 
   let ghostPos: { x: number; z: number } | null = null;
   if (state === 'racing') {
@@ -290,3 +300,10 @@ function frame(now: number) {
   composer.render(dt);
 }
 requestAnimationFrame(frame);
+
+// debug handle for automated checks
+(window as unknown as { __nd: unknown }).__nd = {
+  car, track, debug,
+  get state() { return state; },
+  get lat() { return track.nearest(car.pos.x, car.pos.z, car.trackIdx).lat; },
+};

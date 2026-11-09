@@ -7,7 +7,7 @@ const SCALE = 1.8;
 const LAYOUT: [number, number][] = [
   [0, 0], [150, 0], [230, -60], [240, -160], [170, -230], [80, -190],
   [10, -240], [-90, -280], [-190, -230], [-220, -120], [-150, -70],
-  [-180, 20], [-120, 90], [-40, 70],
+  [-180, 20], [-120, 90], [-85, 35], [-50, 0],
 ];
 
 export interface Nearest {
@@ -112,7 +112,7 @@ export class Track {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.anisotropy = maxAniso;
     tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.28, metalness: 0.6 });
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.42, metalness: 0.5 });
     const mesh = new THREE.Mesh(g, mat);
     mesh.receiveShadow = true;
     return mesh;
@@ -142,7 +142,7 @@ export class Track {
   private buildWall(offset: number, height: number, color: THREE.Color) {
     const N = this.N;
     const pos: number[] = [], col: number[] = [], idx: number[] = [];
-    const bright = color.clone().multiplyScalar(1.6);
+    const bright = color.clone().multiplyScalar(0.9);
     for (let i = 0; i <= N; i++) {
       const k = i % N;
       const p = this.pts[k], s = this.side[k];

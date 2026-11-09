@@ -43,7 +43,7 @@ export function makeCarModel(accent = 0xff2bd6, glowColor = 0x22f3ff): CarModel 
   geo.computeBoundingBox();
   const bb = geo.boundingBox!;
   geo.translate(-(bb.min.x + bb.max.x) / 2, 0, 0);
-  const paint = new THREE.MeshStandardMaterial({ color: 0x1a0f2e, metalness: 0.85, roughness: 0.22 });
+  const paint = new THREE.MeshStandardMaterial({ color: 0x3a2a66, metalness: 0.75, roughness: 0.25 });
   body.add(new THREE.Mesh(geo, paint));
 
   // canopy
@@ -125,7 +125,7 @@ export function makeCarModel(accent = 0xff2bd6, glowColor = 0x22f3ff): CarModel 
   const underglow = new THREE.Mesh(
     new THREE.PlaneGeometry(5.5, 8),
     new THREE.MeshBasicMaterial({
-      map: GLOW_TEX, color: new THREE.Color(glowColor).multiplyScalar(1.2), transparent: true,
+      map: GLOW_TEX, color: new THREE.Color(glowColor).multiplyScalar(0.6), transparent: true,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     }),
   );
