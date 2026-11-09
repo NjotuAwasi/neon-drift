@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#07020f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Neon Drift</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2307020f'/%3E%3Cpath d='M6 22 L16 8 L26 22' fill='none' stroke='%23ff2bd6' stroke-width='3'/%3E%3Cpath d='M10 25 H22' stroke='%2322f3ff' stroke-width='3'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -21,12 +24,19 @@
         <div id="time" class="mid">0:00.000</div>
         <div class="row"><span class="label">BEST</span><span id="best">--</span></div>
         <div class="row"><span class="label">LAST</span><span id="last">--</span></div>
+        <div class="row"><span class="label">STYLE</span><span id="style">0</span></div>
         <div id="delta"></div>
       </div>
 
-      <div id="pos">1<sup>st</sup><span class="dim">/6</span></div>
+      <div id="pos"></div>
 
       <canvas id="minimap" width="220" height="220"></canvas>
+
+      <div id="tButtons" class="touch-only">
+        <button data-act="mute" aria-label="Mute">♪</button>
+        <button data-act="restart" aria-label="Restart">↻</button>
+        <button data-act="menu" aria-label="Menu">✕</button>
+      </div>
 
       <div id="speedo">
         <svg viewBox="0 0 200 200">
@@ -38,33 +48,88 @@
       </div>
 
       <div id="drift">
+        <div id="styleFlash"></div>
         <div id="driftLabel">DRIFT</div>
         <div id="driftBar"><div id="driftFill"></div><i style="left:25%"></i><i style="left:58%"></i></div>
       </div>
 
       <div id="center"></div>
+
+      <div id="tSteer" class="touch-only">
+        <div class="half">◀</div>
+        <div class="half">▶</div>
+      </div>
+      <div id="tRight" class="touch-only">
+        <button id="tBrake">BRAKE</button>
+        <button id="tDrift">DRIFT</button>
+      </div>
     </div>
 
-    <div id="menu">
+    <div id="menu" class="hidden">
       <h1>NEON<br /><span>DRIFT</span></h1>
-      <p class="tag">6 racers · 3 laps · drift to charge · hit the boost pads · win</p>
-      <div class="controls">
+
+      <div id="challengeBanner" class="hidden">
+        <div class="cb-kicker">⚔ CHALLENGE RECEIVED</div>
+        <div id="cbText"></div>
+        <button id="cbDismiss" class="link-btn">no thanks, just play</button>
+      </div>
+
+      <div id="opts">
+        <div class="opt" data-row="track">
+          <span class="k">TRACK</span>
+          <button class="arr" data-dir="-1" aria-label="Previous track">◀</button>
+          <span class="v" id="vTrack"></span>
+          <button class="arr" data-dir="1" aria-label="Next track">▶</button>
+        </div>
+        <div id="trackInfo"></div>
+        <div class="opt" data-row="mode">
+          <span class="k">MODE</span>
+          <button class="arr" data-dir="-1" aria-label="Previous mode">◀</button>
+          <span class="v" id="vMode"></span>
+          <button class="arr" data-dir="1" aria-label="Next mode">▶</button>
+        </div>
+        <div class="opt" data-row="diff">
+          <span class="k">RIVALS</span>
+          <button class="arr" data-dir="-1" aria-label="Easier">◀</button>
+          <span class="v" id="vDiff"></span>
+          <button class="arr" data-dir="1" aria-label="Harder">▶</button>
+        </div>
+        <div class="opt" data-row="name">
+          <span class="k">NAME</span>
+          <input id="vName" maxlength="12" spellcheck="false" autocomplete="off" aria-label="Your name" />
+        </div>
+      </div>
+
+      <button id="startBtn" class="big-btn">START RACE</button>
+
+      <div class="controls desktop-only">
         <div><kbd>W</kbd><kbd>↑</kbd> / <b>RT</b><span>accelerate</span></div>
         <div><kbd>S</kbd><kbd>↓</kbd> / <b>LT</b><span>brake</span></div>
         <div><kbd>A</kbd><kbd>D</kbd> / <b>stick</b><span>steer</span></div>
         <div><kbd>SPACE</kbd> / <b>X · RB</b><span>hold to drift</span></div>
         <div><kbd>R</kbd> / <b>Y</b><span>restart</span></div>
-        <div><kbd>M</kbd><span>mute</span></div>
+        <div><kbd>ESC</kbd> / <b>BACK</b><span>menu</span></div>
       </div>
-      <div id="bestMenu"></div>
-      <div class="press">PRESS <kbd>ENTER</kbd> OR <b>A</b> TO RACE</div>
+      <div class="hint desktop-only">↑↓ select · ←→ change · ENTER start · M mute</div>
     </div>
 
     <div id="results" class="hidden">
-      <h2>FINISH</h2>
-      <div id="resultsBody"></div>
-      <div class="press">PRESS <kbd>ENTER</kbd> OR <b>A</b> TO RACE AGAIN</div>
+      <div class="panel">
+        <h2 id="resTitle">FINISH</h2>
+        <div id="chalLine" class="hidden"></div>
+        <div id="resultsBody"></div>
+        <div class="res-actions">
+          <button id="againBtn" class="big-btn">RACE AGAIN</button>
+          <button id="menuBtn" class="btn">MENU</button>
+          <button id="challengeBtn" class="btn gold hidden" disabled>CHALLENGE A FRIEND</button>
+        </div>
+        <div id="shareStatus"></div>
+        <input id="shareLink" class="hidden" readonly aria-label="Challenge link" />
+        <div class="hint desktop-only">ENTER race again · ESC menu</div>
+      </div>
     </div>
+
+    <div id="rotate">↻ ROTATE YOUR PHONE FOR THE FULL VIEW</div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

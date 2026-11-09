@@ -2,30 +2,45 @@ import * as THREE from 'three';
 import { makeCarModel } from './car';
 import type { Track } from './track';
 
-const KEY = 'neon-drift:best-v1';
 const STEP = 1 / 20; // record at 20 Hz, interpolate on playback
 
-interface Saved { time: number; frames: number[] } // flat [x, z, heading, roll]*
+/** flat [x, z, heading, roll]* sampled every STEP seconds of lap time */
+export interface GhostData {
+  time: number;
+  frames: number[];
+}
 
-export class Ghost {
-  best: Saved | null = null;
+export function loadBest(key: string): GhostData | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as GhostData;
+    return typeof d?.time === 'number' && Array.isArray(d.frames) && d.frames.length >= 8 ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveBest(key: string, d: GhostData) {
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch { /* storage unavailable */ }
+}
+
+export class GhostCar {
+  data: GhostData | null = null;
   private rec: number[] = [];
   private recT = 0;
+  private timeAtIdx: Float32Array | null = null;
   private readonly root: THREE.Group;
+  private readonly mat: THREE.MeshBasicMaterial;
 
   constructor(scene: THREE.Scene) {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) this.best = JSON.parse(raw) as Saved;
-    } catch { /* storage unavailable: ghost just won't persist */ }
-
     const m = makeCarModel(0x22f3ff, 0x22f3ff);
-    const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0x22f3ff).multiplyScalar(0.6), transparent: true, opacity: 0.35,
-      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    this.mat = new THREE.MeshBasicMaterial({
+      transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     });
+    this.setColor(0x22f3ff);
     m.root.traverse((o) => {
-      if (o instanceof THREE.Mesh && o !== m.underglow) o.material = mat;
+      if (o instanceof THREE.Mesh && o !== m.underglow) o.material = this.mat;
     });
     m.underglow.visible = false;
     for (const f of m.flames) f.scale.set(1, 1, 0.8);
@@ -35,13 +50,35 @@ export class Ghost {
     scene.add(this.root);
   }
 
-  get bestTime() { return this.best?.time ?? null; }
+  setColor(hex: number) {
+    this.mat.color.set(hex).multiplyScalar(0.6);
+  }
 
-  private timeAtIdx: Float32Array | null = null;
+  setData(d: GhostData | null, track: Track) {
+    this.data = d;
+    this.index(track);
+  }
 
-  /** Build track-index → ghost-time lookup so we can show a live delta. */
-  index(track: Track) {
-    const f = this.best?.frames;
+  startLap() {
+    this.rec = [];
+    this.recT = 0;
+  }
+
+  record(t: number, x: number, z: number, heading: number, roll: number) {
+    while (this.recT <= t) {
+      this.rec.push(+x.toFixed(2), +z.toFixed(2), +heading.toFixed(3), +roll.toFixed(3));
+      this.recT += STEP;
+    }
+  }
+
+  /** The lap just driven, as ghost data. */
+  takeRecording(time: number): GhostData {
+    return { time, frames: this.rec };
+  }
+
+  /** Track-index → ghost-time lookup, for the live delta. */
+  private index(track: Track) {
+    const f = this.data?.frames;
     if (!f) { this.timeAtIdx = null; return; }
     const arr = new Float32Array(track.N).fill(-1);
     let hint = -1;
@@ -62,29 +99,13 @@ export class Ghost {
     return this.timeAtIdx ? this.timeAtIdx[idx] : null;
   }
 
-  startLap() {
-    this.rec = [];
-    this.recT = 0;
-  }
-
-  record(t: number, x: number, z: number, heading: number, roll: number) {
-    while (this.recT <= t) {
-      this.rec.push(+x.toFixed(2), +z.toFixed(2), +heading.toFixed(3), +roll.toFixed(3));
-      this.recT += STEP;
-    }
-  }
-
-  /** Returns true if this lap is a new best. */
-  finishLap(time: number) {
-    if (this.best && time >= this.best.time) return false;
-    this.best = { time, frames: this.rec };
-    try { localStorage.setItem(KEY, JSON.stringify(this.best)); } catch { /* ignore */ }
-    return true;
+  hide() {
+    this.root.visible = false;
   }
 
   /** Position the ghost at lap-time t; returns its (x,z) or null when hidden. */
   play(t: number, visible: boolean) {
-    const f = this.best?.frames;
+    const f = this.data?.frames;
     if (!visible || !f || f.length < 8) { this.root.visible = false; return null; }
     const n = f.length / 4;
     const ft = t / STEP;

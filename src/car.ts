@@ -156,6 +156,8 @@ export class Car {
   boost = 0; // smoothed 0..1
   throttle = 0;
   steerVis = 0;
+  /** sideways slip speed (u/s), used for drift scoring */
+  lateral = 0;
   private roll = 0;
   private pitch = 0;
   private prevVf = 0;
@@ -246,6 +248,7 @@ export class Car {
     // lateral grip: low when drifting so the tail slides out
     const grip = this.drifting ? 1.5 : c.brake > 0.5 && vf > 30 ? 4 : 9;
     vl *= Math.exp(-grip * dt);
+    this.lateral = vl;
 
     this.vel.set(fx * vf + rx * vl, fz * vf + rz * vl);
     this.heading += steer * turn * speedF * dt;

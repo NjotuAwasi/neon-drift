@@ -1,8 +1,6 @@
 import * as THREE from 'three';
-import { ROAD_HALF, Track } from './track';
-
-export const FOG_COLOR = new THREE.Color(0.32, 0.06, 0.26);
-export const SUN_DIR = new THREE.Vector3(0.35, 0.11, -1).normalize();
+import { ROAD_HALF, type Track } from './track';
+import type { CityOpts, TrackDef } from './tracks';
 
 const skyVert = /* glsl */ `
   varying vec3 vDir;
@@ -16,6 +14,11 @@ const skyVert = /* glsl */ `
 const skyFrag = /* glsl */ `
   uniform vec3 sunDir;
   uniform vec3 fogCol;
+  uniform vec3 skyTop;
+  uniform vec3 skyMid;
+  uniform vec3 horizon;
+  uniform vec3 sunLow;
+  uniform vec3 sunHigh;
   uniform float time;
   uniform float sunStrength;
   varying vec3 vDir;
@@ -25,11 +28,8 @@ const skyFrag = /* glsl */ `
   void main() {
     vec3 d = normalize(vDir);
     float h = d.y;
-    vec3 top = vec3(0.015, 0.008, 0.05);
-    vec3 mid = vec3(0.20, 0.02, 0.28);
-    vec3 hor = vec3(1.0, 0.22, 0.48);
-    vec3 col = mix(mid, top, smoothstep(0.05, 0.55, h));
-    col = mix(hor, col, smoothstep(-0.01, 0.22, h));
+    vec3 col = mix(skyMid, skyTop, smoothstep(0.05, 0.55, h));
+    col = mix(horizon, col, smoothstep(-0.01, 0.22, h));
     if (h < 0.0) col = fogCol;
 
     // stars
@@ -38,13 +38,13 @@ const skyFrag = /* glsl */ `
     float tw = 0.6 + 0.4 * sin(time * 2.0 + s * 60.0);
     if (s > 0.9965) col += vec3(0.85, 0.8, 1.0) * tw * smoothstep(0.12, 0.45, h);
 
-    // synthwave sun
+    // striped synthwave sun / moon
     float a = acos(clamp(dot(d, sunDir), -1.0, 1.0));
     float r = 0.17;
-    col += hor * exp(-a * 5.0) * 0.55;
+    col += horizon * exp(-a * 5.0) * 0.55;
     if (a < r) {
       float t = clamp((d.y - (sunDir.y - r)) / (2.0 * r), 0.0, 1.0);
-      vec3 sc = mix(vec3(1.0, 0.08, 0.55), vec3(1.0, 0.86, 0.25), t);
+      vec3 sc = mix(sunLow, sunHigh, t);
       float band = fract(t * 11.0 - time * 0.15);
       float gap = (0.55 - t) * 1.1;
       float on = t > 0.55 ? 1.0 : step(gap, band);
@@ -66,6 +66,7 @@ const groundVert = /* glsl */ `
 
 const groundFrag = /* glsl */ `
   uniform vec3 fogCol;
+  uniform vec3 gridCol;
   uniform float time;
   varying vec3 vW;
   void main() {
@@ -75,26 +76,42 @@ const groundFrag = /* glsl */ `
     float dist = length(vW.xz - cameraPosition.xz);
     float pulse = 0.75 + 0.25 * sin(dist * 0.02 - time * 2.0);
     vec3 base = vec3(0.012, 0.0, 0.03);
-    vec3 lc = vec3(1.0, 0.12, 0.75) * 1.8 * pulse;
+    vec3 lc = gridCol * 1.8 * pulse;
     vec3 col = base + lc * line * exp(-dist * 0.0022);
     col = mix(fogCol, col, exp(-dist * 0.0011));
     gl_FragColor = vec4(col, 1.0);
   }
 `;
 
-export interface World {
-  update(dt: number, time: number, camera: THREE.Camera): void;
+export interface Environment {
+  update(time: number, camera: THREE.Camera): void;
+  setPalette(def: TrackDef): void;
 }
 
-export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, track: Track): World {
-  scene.background = FOG_COLOR.clone();
-  scene.fog = new THREE.FogExp2(FOG_COLOR.getHex(), 0.0014);
+/** Sky, ground grid, lights and mountains: shared by all tracks, recoloured per track. */
+export function buildEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): Environment {
+  const fog = new THREE.FogExp2(0x000000, 0.0014);
+  scene.fog = fog;
+  const bg = new THREE.Color();
+  scene.background = bg;
 
-  // ---- sky ----
+  const shared = {
+    sunDir: { value: new THREE.Vector3(0, 0.1, -1) },
+    fogCol: { value: new THREE.Color() },
+    time: { value: 0 },
+  };
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: skyVert,
     fragmentShader: skyFrag,
-    uniforms: { sunDir: { value: SUN_DIR }, fogCol: { value: FOG_COLOR }, time: { value: 0 }, sunStrength: { value: 2.4 } },
+    uniforms: {
+      ...shared,
+      sunStrength: { value: 2.4 },
+      skyTop: { value: new THREE.Color() },
+      skyMid: { value: new THREE.Color() },
+      horizon: { value: new THREE.Color() },
+      sunLow: { value: new THREE.Color() },
+      sunHigh: { value: new THREE.Color() },
+    },
     side: THREE.BackSide,
     depthWrite: false,
     toneMapped: false,
@@ -104,42 +121,65 @@ export function buildWorld(scene: THREE.Scene, renderer: THREE.WebGLRenderer, tr
   sky.renderOrder = -1;
   scene.add(sky);
 
-  // environment map from the sky so metal & wet road reflect the neon horizon
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const envScene = new THREE.Scene();
-  // dimmed sun in reflections, otherwise metal surfaces facing it blow out under bloom
-  const envMat = skyMat.clone();
-  envMat.uniforms.sunStrength.value = 0.5;
-  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), envMat));
-  scene.environment = pmrem.fromScene(envScene, 0.02).texture;
-  scene.environmentIntensity = 0.7;
-  envMat.dispose();
-
-  // ---- lights ----
-  scene.add(new THREE.HemisphereLight(0x7a44ff, 0x14001f, 0.7));
-  const sun = new THREE.DirectionalLight(0xff6fb0, 0.35);
-  sun.position.copy(SUN_DIR).multiplyScalar(500);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 0.7);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, 0.35);
   scene.add(sun);
 
-  // ---- ground ----
+  const gridCol = { value: new THREE.Color() };
   const groundMat = new THREE.ShaderMaterial({
     vertexShader: groundVert,
     fragmentShader: groundFrag,
-    uniforms: { fogCol: { value: FOG_COLOR }, time: { value: 0 } },
+    uniforms: { fogCol: shared.fogCol, time: shared.time, gridCol },
   });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   scene.add(ground);
 
-  buildCity(scene, track);
-  buildMountains(scene);
+  const wire = buildMountains(scene);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envMaps = new Map<string, THREE.Texture>();
 
   return {
-    update(_dt, time, camera) {
+    update(time, camera) {
       sky.position.copy(camera.position);
-      skyMat.uniforms.time.value = time;
-      groundMat.uniforms.time.value = time;
+      shared.time.value = time;
+    },
+    setPalette(def) {
+      const p = def.palette;
+      const u = skyMat.uniforms;
+      u.sunDir.value.copy(p.sunDir);
+      u.fogCol.value.copy(p.fog);
+      u.skyTop.value.copy(p.skyTop);
+      u.skyMid.value.copy(p.skyMid);
+      u.horizon.value.copy(p.horizon);
+      u.sunLow.value.copy(p.sunLow);
+      u.sunHigh.value.copy(p.sunHigh);
+      gridCol.value.copy(p.grid);
+      fog.color.copy(p.fog);
+      bg.copy(p.fog);
+      hemi.color.set(p.hemiSky);
+      hemi.groundColor.set(p.hemiGround);
+      sun.color.set(p.sunLight);
+      sun.position.copy(p.sunDir).multiplyScalar(500);
+      wire.color.set(p.mountain).multiplyScalar(1.4);
+
+      // reflections: sky with a dimmed sun, otherwise metal facing it blows out under bloom
+      let tex = envMaps.get(def.id);
+      if (!tex) {
+        const envMat = skyMat.clone();
+        envMat.uniforms.sunStrength.value = 0.5;
+        const envScene = new THREE.Scene();
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), envMat);
+        envScene.add(sphere);
+        tex = pmrem.fromScene(envScene, 0.02).texture;
+        envMaps.set(def.id, tex);
+        envMat.dispose();
+        sphere.geometry.dispose();
+      }
+      scene.environment = tex;
+      scene.environmentIntensity = 0.7;
     },
   };
 }
@@ -173,15 +213,17 @@ function windowCanvas(rows: number, cols: number, rand: () => number) {
   return c;
 }
 
-function buildCity(scene: THREE.Scene, track: Track) {
-  const rand = rng(1337);
+/** Procedural city around a track. Same seed + options always give the same city. */
+export function buildCity(track: Track, opts: CityOpts) {
+  const group = new THREE.Group();
+  const rand = rng(opts.seed);
   const b = track.bounds;
-  const pad = 650;
+  const pad = opts.pad;
   const palette = [0xff4fd8, 0x4ff3ff, 0xb56bff, 0xffb347, 0xff6f91, 0x7d8bff].map((c) => new THREE.Color(c));
   const classes = [
-    { count: 520, h: [14, 40], w: [10, 24], rows: 6 },
-    { count: 260, h: [45, 95], w: [14, 28], rows: 14 },
-    { count: 90, h: [110, 210], w: [18, 34], rows: 28 },
+    { count: opts.counts[0], h: [14, 40], w: [10, 24], rows: 6 },
+    { count: opts.counts[1], h: [45, 95], w: [14, 28], rows: 14 },
+    { count: opts.counts[2], h: [110, 210], w: [18, 34], rows: 28 },
   ];
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -206,8 +248,7 @@ function buildCity(scene: THREE.Scene, track: Track) {
       const clearance = ROAD_HALF + 10 + Math.max(w, d) * 0.75;
       const dist = track.distance(x, z);
       if (dist < clearance) continue;
-      // tall towers stay back from the road so they frame rather than block the view
-      if (cl.h[0] > 100 && dist < 140) continue;
+      if (cl.h[0] > 100 && dist < opts.towerDist) continue;
       const h = cl.h[0] + rand() * (cl.h[1] - cl.h[0]);
       pos.set(x, 0, z);
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rand() < 0.5 ? 0 : Math.PI / 2);
@@ -220,13 +261,11 @@ function buildCity(scene: THREE.Scene, track: Track) {
       n++;
     }
     mesh.count = n;
-    scene.add(mesh);
+    group.add(mesh);
   }
 
   // neon rooftop rims
-  const rimGeo = new THREE.BoxGeometry(1, 1, 1);
-  const rimMat = new THREE.MeshBasicMaterial({ toneMapped: false });
-  const rims = new THREE.InstancedMesh(rimGeo, rimMat, tops.length);
+  const rims = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ toneMapped: false }), tops.length);
   tops.forEach((t, i) => {
     pos.set(t.x, t.y + 0.4, t.z);
     q.identity();
@@ -235,7 +274,8 @@ function buildCity(scene: THREE.Scene, track: Track) {
     rims.setMatrixAt(i, m);
     rims.setColorAt(i, t.c.clone().multiplyScalar(2.2));
   });
-  scene.add(rims);
+  group.add(rims);
+  return group;
 }
 
 function buildMountains(scene: THREE.Scene) {
@@ -257,9 +297,7 @@ function buildMountains(scene: THREE.Scene) {
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(idx);
   const solid = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x0c0218, side: THREE.DoubleSide, fog: false }));
-  const wire = new THREE.Mesh(
-    g,
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0xb02bff).multiplyScalar(1.4), wireframe: true, fog: false, toneMapped: false, transparent: true, opacity: 0.5 }),
-  );
-  scene.add(solid, wire);
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, fog: false, toneMapped: false, transparent: true, opacity: 0.5 });
+  scene.add(solid, new THREE.Mesh(g, wireMat));
+  return wireMat;
 }

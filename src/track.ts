@@ -1,14 +1,7 @@
 import * as THREE from 'three';
+import type { TrackDef } from './tracks';
 
 export const ROAD_HALF = 10;
-const SCALE = 1.8;
-
-// Hand-designed closed circuit (x, z). Start/finish is the first point, heading +x.
-const LAYOUT: [number, number][] = [
-  [0, 0], [150, 0], [230, -60], [240, -160], [170, -230], [80, -190],
-  [10, -240], [-90, -280], [-190, -230], [-220, -120], [-150, -70],
-  [-180, 20], [-120, 90], [-85, 35], [-50, 0],
-];
 
 export interface BoostPad {
   idx: number;
@@ -26,20 +19,25 @@ export interface Nearest {
 
 export class Track {
   readonly N = 2000;
+  readonly group = new THREE.Group();
   readonly curve: THREE.CatmullRomCurve3;
   readonly length: number;
+  readonly spacing: number;
   readonly pts: THREE.Vector3[] = [];
   readonly tan: THREE.Vector3[] = [];
   readonly side: THREE.Vector3[] = [];
   readonly bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
-  private readonly result: Nearest = { idx: 0, lat: 0 };
   readonly pads: BoostPad[] = [];
+  /** max comfortable speed at each sample, including braking zones (used by the AI) */
+  readonly profile: Float32Array;
+  private readonly result: Nearest = { idx: 0, lat: 0 };
   private padTex?: THREE.Texture;
 
-  constructor(scene: THREE.Scene, maxAniso: number) {
-    const ctrl = LAYOUT.map(([x, z]) => new THREE.Vector3(x * SCALE, 0, z * SCALE));
-    this.curve = new THREE.CatmullRomCurve3(ctrl, true, 'centripetal');
+  constructor(readonly def: TrackDef, maxAniso: number) {
+    this.curve = new THREE.CatmullRomCurve3(def.points.map((p) => p.clone()), true, 'centripetal');
+    if (def.arcDivisions) this.curve.arcLengthDivisions = def.arcDivisions;
     this.length = this.curve.getLength();
+    this.spacing = this.length / this.N;
 
     for (let i = 0; i < this.N; i++) {
       const u = i / this.N;
@@ -53,109 +51,20 @@ export class Track {
       b.minZ = Math.min(b.minZ, p.z); b.maxZ = Math.max(b.maxZ, p.z);
     }
 
-    scene.add(this.buildRoad(maxAniso));
-    scene.add(this.buildFlatRibbon(ROAD_HALF - 0.2, 0.35, 0.03, new THREE.Color(0xff2bd6).multiplyScalar(3)));
-    scene.add(this.buildFlatRibbon(-ROAD_HALF + 0.2, 0.35, 0.03, new THREE.Color(0x22f3ff).multiplyScalar(3)));
-    scene.add(this.buildWall(ROAD_HALF, 1.6, new THREE.Color(0xff2bd6)));
-    scene.add(this.buildWall(-ROAD_HALF, 1.6, new THREE.Color(0x22f3ff)));
-    scene.add(this.buildPylons());
-    scene.add(this.buildStartGate(maxAniso));
-    scene.add(this.buildBoostPads(maxAniso));
+    const g = this.group;
+    g.add(this.buildRoad(maxAniso));
+    g.add(this.buildFlatRibbon(ROAD_HALF - 0.2, 0.35, 0.03, new THREE.Color(0xff2bd6).multiplyScalar(3)));
+    g.add(this.buildFlatRibbon(-ROAD_HALF + 0.2, 0.35, 0.03, new THREE.Color(0x22f3ff).multiplyScalar(3)));
+    g.add(this.buildWall(ROAD_HALF, 1.6, new THREE.Color(0xff2bd6)));
+    g.add(this.buildWall(-ROAD_HALF, 1.6, new THREE.Color(0x22f3ff)));
+    g.add(this.buildPylons());
+    g.add(this.buildStartGate(maxAniso));
+    g.add(this.buildBoostPads(maxAniso));
+    this.profile = this.computeProfile();
   }
 
   update(dt: number) {
     if (this.padTex) this.padTex.offset.y = (this.padTex.offset.y + dt * 1.6) % 1;
-  }
-
-  /** Pad the given car position is on, if any. */
-  padAt(idx: number, lat: number): BoostPad | null {
-    const halfSamples = (PAD_LEN / 2) / (this.length / this.N);
-    for (const p of this.pads) {
-      let d = idx - p.idx;
-      if (d > this.N / 2) d -= this.N;
-      if (d < -this.N / 2) d += this.N;
-      if (Math.abs(d) <= halfSamples && Math.abs(lat - p.lat) <= PAD_HALF_W + 0.6) return p;
-    }
-    return null;
-  }
-
-  /** Next pad ahead within `range` samples, for AI line choice. */
-  padAhead(idx: number, range: number): BoostPad | null {
-    let best: BoostPad | null = null, bd = Infinity;
-    for (const p of this.pads) {
-      const d = this.wrap(p.idx - idx);
-      if (d > 4 && d < range && d < bd) { bd = d; best = p; }
-    }
-    return best;
-  }
-
-  /** Bend (radians) between tangents i and i+span. */
-  private bend(i: number, span: number) {
-    const a = this.tan[this.wrap(i)], b = this.tan[this.wrap(i + span)];
-    return Math.acos(Math.min(1, a.x * b.x + a.z * b.z));
-  }
-
-  private buildBoostPads(maxAniso: number) {
-    // pick the straightest spots, spread around the lap, away from the start line
-    const candidates: { i: number; score: number }[] = [];
-    for (let i = 80; i < this.N - 80; i += 10) {
-      candidates.push({ i, score: this.bend(i - 30, 30) + this.bend(i, 90) });
-    }
-    candidates.sort((a, b) => a.score - b.score);
-    const minGap = this.N / 9;
-    const lanes = [-4.5, 4.5, 0, 4.5, -4.5, 0, -4.5];
-    for (const c of candidates) {
-      if (this.pads.length >= 6) break;
-      if (c.score > 1.1) break;
-      if (this.pads.some((p) => Math.abs(p.idx - c.i) < minGap)) continue;
-      this.pads.push({ idx: c.i, lat: 0 });
-    }
-    this.pads.sort((a, b) => a.idx - b.idx);
-    this.pads.forEach((p, n) => (p.lat = lanes[n % lanes.length]));
-
-    const tex = new THREE.CanvasTexture(chevronCanvas());
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.anisotropy = maxAniso;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    this.padTex = tex;
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex, color: new THREE.Color(3, 3, 3), transparent: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-    });
-    const frameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23f).multiplyScalar(2.2), toneMapped: false, side: THREE.DoubleSide });
-    const geo = new THREE.PlaneGeometry(PAD_HALF_W * 2, PAD_LEN);
-    geo.rotateX(-Math.PI / 2);
-    // upward chevron hanging in the arch (shape in XY, faces the oncoming car)
-    const chev = new THREE.Shape();
-    chev.moveTo(-0.9, -0.35); chev.lineTo(0, 0.35); chev.lineTo(0.9, -0.35);
-    chev.lineTo(0.6, -0.35); chev.lineTo(0, 0.1); chev.lineTo(-0.6, -0.35);
-    chev.closePath();
-    const arrowGeo = new THREE.ShapeGeometry(chev);
-    const group = new THREE.Group();
-    for (const p of this.pads) {
-      const c = this.pts[p.idx], s = this.side[p.idx], t = this.tan[p.idx];
-      const g = new THREE.Group();
-      g.position.set(c.x + s.x * p.lat, 0.04, c.z + s.z * p.lat);
-      g.rotation.y = Math.atan2(t.x, t.z);
-      g.add(new THREE.Mesh(geo, mat));
-      for (const sx of [1, -1]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.08, PAD_LEN), frameMat);
-        rail.position.set(sx * PAD_HALF_W, 0.04, 0);
-        g.add(rail);
-        // entrance arch posts, visible from far away
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.2, 0.18), frameMat);
-        post.position.set(sx * (PAD_HALF_W + 0.2), 1.6, -PAD_LEN / 2);
-        g.add(post);
-      }
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(PAD_HALF_W * 2 + 0.6, 0.18, 0.18), frameMat);
-      bar.position.set(0, 3.2, -PAD_LEN / 2);
-      g.add(bar);
-      const arrow = new THREE.Mesh(arrowGeo, frameMat);
-      arrow.position.set(0, 2.3, -PAD_LEN / 2);
-      g.add(arrow);
-      group.add(g);
-    }
-    return group;
   }
 
   wrap(i: number) {
@@ -190,6 +99,59 @@ export class Track {
       if (d < bd) bd = d;
     }
     return Math.sqrt(bd);
+  }
+
+  /** Pad the given car position is on, if any. */
+  padAt(idx: number, lat: number): BoostPad | null {
+    const halfSamples = PAD_LEN / 2 / this.spacing;
+    for (const p of this.pads) {
+      let d = idx - p.idx;
+      if (d > this.N / 2) d -= this.N;
+      if (d < -this.N / 2) d += this.N;
+      if (Math.abs(d) <= halfSamples && Math.abs(lat - p.lat) <= PAD_HALF_W + 0.6) return p;
+    }
+    return null;
+  }
+
+  /** Next pad ahead within `range` samples, for AI line choice. */
+  padAhead(idx: number, range: number): BoostPad | null {
+    let best: BoostPad | null = null, bd = Infinity;
+    for (const p of this.pads) {
+      const d = this.wrap(p.idx - idx);
+      if (d > 4 && d < range && d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+
+  /** Bend (radians) between tangents i and i+span. */
+  private bend(i: number, span: number) {
+    const a = this.tan[this.wrap(i)], b = this.tan[this.wrap(i + span)];
+    return Math.acos(Math.min(1, a.x * b.x + a.z * b.z));
+  }
+
+  /**
+   * Corner speed from local curvature, matched to the car's turn-rate model
+   * (v ≤ 1.85·R / (1 + 0.004625·R)), then a backward pass adds braking zones.
+   */
+  private computeProfile() {
+    const N = this.N, sp = this.spacing;
+    const w = Math.max(2, Math.round(6 / sp));
+    const v = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = this.tan[this.wrap(i - w)], b = this.tan[this.wrap(i + w)];
+      const ang = Math.acos(Math.min(1, a.x * b.x + a.z * b.z));
+      const R = ang > 1e-5 ? (2 * w * sp) / ang : 1e5;
+      v[i] = Math.min(110, (0.9 * 1.85 * R) / (1 + 0.004625 * R));
+    }
+    const D = 42; // planned deceleration (u/s²)
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = N - 1; i >= 0; i--) {
+        const nxt = v[(i + 1) % N];
+        const lim = Math.sqrt(nxt * nxt + 2 * D * sp);
+        if (v[i] > lim) v[i] = lim;
+      }
+    }
+    return v;
   }
 
   private buildRoad(maxAniso: number) {
@@ -272,7 +234,7 @@ export class Track {
   }
 
   private buildPylons() {
-    const spacing = Math.round(28 / (this.length / this.N));
+    const spacing = Math.round(28 / this.spacing);
     const count = Math.floor(this.N / spacing) * 2;
     const geo = new THREE.BoxGeometry(0.45, 2.6, 0.45);
     geo.translate(0, 1.3, 0);
@@ -332,6 +294,80 @@ export class Track {
     g.add(barGlow);
     return g;
   }
+
+  private placePads() {
+    if (this.def.pads) {
+      for (const s of this.def.pads) {
+        const n = this.nearest(s.x, s.z, -1);
+        this.pads.push({ idx: n.idx, lat: s.lat });
+      }
+      this.pads.sort((a, b) => a.idx - b.idx);
+      return;
+    }
+    // auto: the straightest spots, spread around the lap, away from the start line
+    const candidates: { i: number; score: number }[] = [];
+    for (let i = 80; i < this.N - 80; i += 10) {
+      candidates.push({ i, score: this.bend(i - 30, 30) + this.bend(i, 90) });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    const minGap = this.N / 9;
+    const lanes = [-4.5, 4.5, 0, 4.5, -4.5, 0, -4.5];
+    for (const c of candidates) {
+      if (this.pads.length >= 6) break;
+      if (c.score > 1.1) break;
+      if (this.pads.some((p) => Math.abs(p.idx - c.i) < minGap)) continue;
+      this.pads.push({ idx: c.i, lat: 0 });
+    }
+    this.pads.sort((a, b) => a.idx - b.idx);
+    this.pads.forEach((p, n) => (p.lat = lanes[n % lanes.length]));
+  }
+
+  private buildBoostPads(maxAniso: number) {
+    this.placePads();
+
+    const tex = new THREE.CanvasTexture(chevronCanvas());
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = maxAniso;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.padTex = tex;
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, color: new THREE.Color(3, 3, 3), transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    });
+    const frameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd23f).multiplyScalar(2.2), toneMapped: false, side: THREE.DoubleSide });
+    const geo = new THREE.PlaneGeometry(PAD_HALF_W * 2, PAD_LEN);
+    geo.rotateX(-Math.PI / 2);
+    // upward chevron hanging in the arch, facing the oncoming car
+    const chev = new THREE.Shape();
+    chev.moveTo(-0.9, -0.35); chev.lineTo(0, 0.35); chev.lineTo(0.9, -0.35);
+    chev.lineTo(0.6, -0.35); chev.lineTo(0, 0.1); chev.lineTo(-0.6, -0.35);
+    chev.closePath();
+    const arrowGeo = new THREE.ShapeGeometry(chev);
+    const group = new THREE.Group();
+    for (const p of this.pads) {
+      const c = this.pts[p.idx], s = this.side[p.idx], t = this.tan[p.idx];
+      const g = new THREE.Group();
+      g.position.set(c.x + s.x * p.lat, 0.04, c.z + s.z * p.lat);
+      g.rotation.y = Math.atan2(t.x, t.z);
+      g.add(new THREE.Mesh(geo, mat));
+      for (const sx of [1, -1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.08, PAD_LEN), frameMat);
+        rail.position.set(sx * PAD_HALF_W, 0.04, 0);
+        g.add(rail);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.2, 0.18), frameMat);
+        post.position.set(sx * (PAD_HALF_W + 0.2), 1.6, -PAD_LEN / 2);
+        g.add(post);
+      }
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(PAD_HALF_W * 2 + 0.6, 0.18, 0.18), frameMat);
+      bar.position.set(0, 3.2, -PAD_LEN / 2);
+      g.add(bar);
+      const arrow = new THREE.Mesh(arrowGeo, frameMat);
+      arrow.position.set(0, 2.3, -PAD_LEN / 2);
+      g.add(arrow);
+      group.add(g);
+    }
+    return group;
+  }
 }
 
 function roadCanvas() {
@@ -340,17 +376,14 @@ function roadCanvas() {
   const g = c.getContext('2d')!;
   g.fillStyle = '#0a0812';
   g.fillRect(0, 0, 256, 512);
-  // asphalt speckle
   for (let i = 0; i < 5000; i++) {
     const v = 10 + Math.random() * 22;
     g.fillStyle = `rgb(${v},${v * 0.9},${v * 1.3})`;
     g.fillRect(Math.random() * 256, Math.random() * 512, 1.5, 1.5);
   }
-  // subtle lane seams
   g.fillStyle = 'rgba(160,120,255,0.10)';
   g.fillRect(84, 0, 2, 512);
   g.fillRect(170, 0, 2, 512);
-  // centre dash
   g.fillStyle = 'rgba(240,230,255,0.55)';
   g.fillRect(124, 0, 8, 256);
   return c;
