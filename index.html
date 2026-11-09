@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Drift</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud" class="hidden">
+      <div id="timing">
+        <div class="label">LAP</div>
+        <div id="lap" class="big">1<span class="dim">/3</span></div>
+        <div class="label">TIME</div>
+        <div id="time" class="mid">0:00.000</div>
+        <div class="row"><span class="label">BEST</span><span id="best">--</span></div>
+        <div class="row"><span class="label">LAST</span><span id="last">--</span></div>
+        <div id="delta"></div>
+      </div>
+
+      <canvas id="minimap" width="220" height="220"></canvas>
+
+      <div id="speedo">
+        <svg viewBox="0 0 200 200">
+          <circle class="arc-bg" cx="100" cy="100" r="80" />
+          <circle id="speedArc" class="arc" cx="100" cy="100" r="80" />
+        </svg>
+        <div id="speed">0</div>
+        <div class="unit">KM/H</div>
+      </div>
+
+      <div id="drift">
+        <div id="driftLabel">DRIFT</div>
+        <div id="driftBar"><div id="driftFill"></div><i style="left:25%"></i><i style="left:58%"></i></div>
+      </div>
+
+      <div id="center"></div>
+    </div>
+
+    <div id="menu">
+      <h1>NEON<br /><span>DRIFT</span></h1>
+      <p class="tag">3 laps · drift to charge · release to boost · beat your ghost</p>
+      <div class="controls">
+        <div><kbd>W</kbd><kbd>↑</kbd> / <b>RT</b><span>accelerate</span></div>
+        <div><kbd>S</kbd><kbd>↓</kbd> / <b>LT</b><span>brake</span></div>
+        <div><kbd>A</kbd><kbd>D</kbd> / <b>stick</b><span>steer</span></div>
+        <div><kbd>SPACE</kbd> / <b>X · RB</b><span>hold to drift</span></div>
+        <div><kbd>R</kbd> / <b>Y</b><span>restart</span></div>
+        <div><kbd>M</kbd><span>mute</span></div>
+      </div>
+      <div id="bestMenu"></div>
+      <div class="press">PRESS <kbd>ENTER</kbd> OR <b>A</b> TO RACE</div>
+    </div>
+
+    <div id="results" class="hidden">
+      <h2>FINISH</h2>
+      <div id="resultsBody"></div>
+      <div class="press">PRESS <kbd>ENTER</kbd> OR <b>A</b> TO RACE AGAIN</div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
