@@ -2,6 +2,16 @@ import type { Track } from './track';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
+export interface Standing {
+  name: string;
+  color: string;
+  isPlayer: boolean;
+  time: number | null;
+}
+
+const suffix = (n: number) => (n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th');
+const ordinal = (n: number) => `${n}${suffix(n)}`;
+
 export function fmt(t: number | null) {
   if (t === null || !isFinite(t)) return '--';
   const m = Math.floor(t / 60);
@@ -14,7 +24,7 @@ export class Hud {
     hud: $('hud'), menu: $('menu'), results: $('results'), resultsBody: $('resultsBody'),
     lap: $('lap'), time: $('time'), best: $('best'), last: $('last'), delta: $('delta'),
     speed: $('speed'), arc: $('speedArc'), driftFill: $('driftFill'), driftLabel: $('driftLabel'),
-    center: $('center'), bestMenu: $('bestMenu'),
+    center: $('center'), bestMenu: $('bestMenu'), pos: $('pos'),
   };
   private readonly map = $<HTMLCanvasElement>('minimap').getContext('2d')!;
   private readonly mapPts: [number, number][] = [];
@@ -51,14 +61,22 @@ export class Hud {
     this.el.hud.classList.remove('hidden');
   }
 
-  showResults(laps: number[], best: number | null) {
+  showResults(laps: number[], best: number | null, standings: Standing[]) {
     const fastest = Math.min(...laps);
-    const total = laps.reduce((a, b) => a + b, 0);
+    const rows = standings.map((s, i) =>
+      `<tr class="${s.isPlayer ? 'you' : ''}"><td>${ordinal(i + 1)}</td>` +
+      `<td><span class="sw" style="color:${s.color}"></span>${s.name}</td>` +
+      `<td>${s.time !== null ? fmt(s.time) : 'racing…'}</td></tr>`).join('');
     this.el.resultsBody.innerHTML =
-      laps.map((t, i) => `<div class="${t === fastest ? 'best' : ''}">LAP ${i + 1} &nbsp; ${fmt(t)}</div>`).join('') +
-      `<div class="total">TOTAL ${fmt(total)}</div>` +
-      `<div>ALL-TIME BEST LAP &nbsp; <span class="best">${fmt(best)}</span></div>`;
+      `<table class="standings">${rows}</table>` +
+      `<div class="laps">${laps.map((t, i) => `<span class="${t === fastest ? 'best' : ''}">L${i + 1} ${fmt(t)}</span>`).join(' &nbsp;·&nbsp; ')}</div>` +
+      `<div class="laps">BEST LAP EVER &nbsp; <span class="best">${fmt(best)}</span></div>`;
     this.el.results.classList.remove('hidden');
+  }
+
+  setPosition(pos: number, total: number) {
+    this.el.pos.innerHTML = `${pos}<sup>${suffix(pos)}</sup><span class="dim">/${total}</span>`;
+    this.el.pos.classList.toggle('first', pos === 1);
   }
 
   flash(text: string, ms = 1100, cls = '') {
@@ -99,7 +117,7 @@ export class Hud {
     label.className = drifting && tier ? `t${tier}` : '';
   }
 
-  drawMap(car: { x: number; z: number }, ghost: { x: number; z: number } | null) {
+  drawMap(car: { x: number; z: number }, ghost: { x: number; z: number } | null, rivals: { x: number; z: number; color: string }[] = []) {
     const g = this.map;
     g.clearRect(0, 0, 220, 220);
     g.lineWidth = 5;
@@ -119,6 +137,12 @@ export class Hud {
       g.fillStyle = 'rgba(34,243,255,0.6)';
       g.shadowColor = '#22f3ff';
       g.beginPath(); g.arc(gx, gy, 5, 0, Math.PI * 2); g.fill();
+    }
+    for (const r of rivals) {
+      const [rx, ry] = this.project(r.x, r.z);
+      g.fillStyle = r.color;
+      g.shadowColor = r.color;
+      g.beginPath(); g.arc(rx, ry, 4.5, 0, Math.PI * 2); g.fill();
     }
     const [cx, cy] = this.project(car.x, car.z);
     g.fillStyle = '#ffd23f';

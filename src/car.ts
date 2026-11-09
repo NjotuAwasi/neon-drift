@@ -161,8 +161,8 @@ export class Car {
   private prevVf = 0;
   private hoverT = Math.random() * 10;
 
-  constructor(scene: THREE.Scene) {
-    this.model = makeCarModel();
+  constructor(scene: THREE.Scene, accent = 0xff2bd6, glow = 0x22f3ff) {
+    this.model = makeCarModel(accent, glow);
     this.model.root.rotation.order = 'YXZ';
     scene.add(this.model.root);
   }
@@ -176,12 +176,20 @@ export class Car {
   }
   get driftFraction() { return Math.min(1, this.driftCharge / TIERS[2]); }
 
-  placeAt(track: Track, idx: number) {
-    const p = track.pts[track.wrap(idx)], t = track.tan[track.wrap(idx)];
-    this.pos.set(p.x, 0, p.z);
+  /** Boost pad / external boost. Returns true if this started a new boost. */
+  padBoost(seconds: number) {
+    const fresh = this.boostTime < 0.2;
+    this.boostTime = Math.max(this.boostTime, seconds);
+    return fresh;
+  }
+
+  placeAt(track: Track, idx: number, lat = 0) {
+    const k = track.wrap(idx);
+    const p = track.pts[k], t = track.tan[k], s = track.side[k];
+    this.pos.set(p.x + s.x * lat, 0, p.z + s.z * lat);
     this.heading = Math.atan2(t.x, t.z);
     this.vel.set(0, 0);
-    this.trackIdx = track.wrap(idx);
+    this.trackIdx = k;
     this.drifting = false;
     this.driftCharge = 0;
     this.boostTime = 0;

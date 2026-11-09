@@ -58,6 +58,21 @@ kbd {
 #delta.ahead { color: var(--cyan); }
 #delta.behind { color: var(--pink); }
 
+#pos {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  font-size: 56px; font-weight: 900; font-style: italic;
+  text-shadow: 0 0 18px var(--cyan);
+}
+#pos sup { font-size: 0.4em; margin-left: 2px; }
+#pos.first { color: var(--gold); text-shadow: 0 0 18px var(--gold); }
+
+.standings { margin: 0 auto 16px; border-collapse: collapse; font-size: 17px; }
+.standings td { padding: 3px 14px; text-align: left; }
+.standings td:first-child { text-align: right; color: var(--dim); }
+.standings tr.you { background: rgba(255, 255, 255, 0.08); }
+.standings .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; box-shadow: 0 0 8px currentColor; background: currentColor; }
+.laps { font-size: 14px; color: var(--dim); line-height: 1.6; }
+
 #minimap {
   position: absolute; top: 20px; right: 20px;
   width: 180px; height: 180px;
@@ -142,5 +157,7 @@ kbd {
   #speed { font-size: 32px; }
   #speedo .unit { bottom: 28px; }
   #center { font-size: 44px; }
+  #pos { font-size: 34px; top: 12px; }
+  .standings { font-size: 13px; }
   .controls { grid-template-columns: 1fr; gap: 6px; }
 }
