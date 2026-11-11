@@ -36,3 +36,11 @@ npm run dev        # http://localhost:5173
 npm run build      # static build in dist/
 npx vercel --prod  # deploy
 ```
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR, run `npm run typecheck` and `npm run build` to make sure everything compiles. For larger changes, open an issue first so we can talk through the idea.
+
+## License
+
+[MIT](LICENSE) © Njotu Awasi
