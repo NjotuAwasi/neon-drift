@@ -33,6 +33,7 @@
       <canvas id="minimap" width="220" height="220"></canvas>
 
       <div id="tButtons" class="touch-only">
+        <button data-act="cam" aria-label="Switch camera">👁</button>
         <button data-act="mute" aria-label="Mute">♪</button>
         <button data-act="restart" aria-label="Restart">↻</button>
         <button data-act="menu" aria-label="Menu">✕</button>
@@ -111,6 +112,31 @@
         <div><kbd>ESC</kbd> / <b>BACK</b><span>menu</span></div>
       </div>
       <div class="hint desktop-only">↑↓ select · ←→ change · ENTER start · M mute</div>
+    </div>
+
+    <div id="garage" class="hidden">
+      <div class="g-top">
+        <div class="g-kicker">GARAGE · CHOOSE YOUR CAR</div>
+        <div class="g-pick">
+          <button class="arr" id="gPrev" aria-label="Previous car">◀</button>
+          <div>
+            <div id="gName"></div>
+            <div id="gCount"></div>
+          </div>
+          <button class="arr" id="gNext" aria-label="Next car">▶</button>
+        </div>
+        <div id="gBlurb"></div>
+        <div id="gStats" class="stats"></div>
+      </div>
+      <div class="g-bottom">
+        <div id="gViews" aria-label="Camera views"></div>
+        <div class="g-actions">
+          <button id="gBack" class="btn">BACK</button>
+          <button id="gGo" class="big-btn">RACE</button>
+        </div>
+        <div class="hint desktop-only">DRAG orbit · SCROLL zoom · RIGHT-DRAG pan · ←→ car · ↑↓ view · ENTER race</div>
+        <div class="hint touch-only">DRAG to orbit · PINCH to zoom · TWO-FINGER drag to pan</div>
+      </div>
     </div>
 
     <div id="results" class="hidden">

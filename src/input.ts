@@ -10,6 +10,7 @@ export interface Controls {
   restart: boolean; // edge-triggered
   mute: boolean; // edge-triggered
   back: boolean; // edge-triggered
+  camera: boolean; // edge-triggered: chase <-> driver view
   navX: number; // edge-triggered menu navigation, -1/0/1
   navY: number;
 }
@@ -58,6 +59,7 @@ export function readControls(dt: number): Controls {
     restart: tapped('KeyR'),
     mute: tapped('KeyM'),
     back: tapped('Escape'),
+    camera: tapped('KeyC', 'KeyV'),
     navX: (tapped('ArrowRight', 'KeyD') ? 1 : 0) - (tapped('ArrowLeft', 'KeyA') ? 1 : 0),
     navY: (tapped('ArrowDown', 'KeyS') ? 1 : 0) - (tapped('ArrowUp', 'KeyW') ? 1 : 0),
   };
@@ -79,6 +81,7 @@ export function readControls(dt: number): Controls {
     c.start ||= edge(0) || edge(9);
     c.restart ||= edge(3);
     c.back ||= edge(8);
+    c.camera ||= edge(4); // LB
     // menu navigation: d-pad, or flicking the stick
     const sx = Math.abs(ax) > 0.6 ? Math.sign(ax) : 0;
     const sy = Math.abs(ay) > 0.6 ? Math.sign(ay) : 0;

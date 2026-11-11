@@ -197,6 +197,37 @@ kbd {
 #vName:focus { outline: none; border-bottom-color: var(--cyan); }
 #trackInfo { font-size: 11px; letter-spacing: 0.08em; color: var(--dim); line-height: 1.8; padding: 0 0 6px; }
 #trackInfo .rec { color: var(--ink); }
+.stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin-top: 4px; font-size: 11px; color: var(--dim); }
+.stats .stat { display: inline-flex; align-items: center; gap: 6px; }
+.stats .stat b { font-weight: 500; letter-spacing: 0.2em; font-size: 10px; }
+.stats .stat i { display: inline-flex; gap: 2px; }
+.stats .stat u { display: block; width: 10px; height: 6px; border-radius: 1px; background: rgba(244, 236, 255, 0.15); }
+.stats .stat u.on { background: var(--cyan); box-shadow: 0 0 6px rgba(34, 243, 255, 0.6); }
+
+/* ---------- garage ---------- */
+/* the overlay lets drags through to the canvas (orbit camera); only the panels catch clicks */
+#garage {
+  position: fixed; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between; align-items: center;
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom)); text-align: center;
+  background: linear-gradient(rgba(6, 3, 12, 0.7), transparent 26%, transparent 70%, rgba(6, 3, 12, 0.75));
+}
+#garage .g-top, #garage .g-bottom { pointer-events: auto; width: min(640px, 100%); }
+.g-kicker { font-size: 11px; letter-spacing: 0.35em; color: var(--cyan); text-shadow: 0 0 10px rgba(34, 243, 255, 0.6); }
+.g-pick { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; margin-top: 6px; }
+.g-pick .arr { font-size: 24px; }
+#gName { font-size: clamp(20px, 3.4vw, 32px); font-weight: 900; letter-spacing: 0.12em; font-style: italic; text-shadow: 0 0 16px rgba(255, 43, 214, 0.6); }
+#gCount { font-size: 10px; letter-spacing: 0.3em; color: var(--dim); margin-top: 2px; }
+#gBlurb { font-size: 11px; letter-spacing: 0.06em; line-height: 1.6; color: var(--dim); margin: 6px auto 4px; max-width: 520px; }
+#gViews { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.vbtn {
+  padding: 7px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.15em;
+  background: rgba(12, 4, 28, 0.6); border: 1px solid rgba(34, 243, 255, 0.35); border-radius: 5px; color: var(--dim);
+}
+.vbtn.on, .vbtn:hover { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 10px rgba(34, 243, 255, 0.35); }
+.g-actions { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 12px; }
+.g-actions .big-btn { margin-top: 0; }
+#garage .hint { margin-top: 10px; font-size: 10px; }
 
 .controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 36px; font-size: 12px; text-align: left; margin-top: 22px; }
 .controls span { color: var(--dim); margin-left: 10px; font-size: 11px; letter-spacing: 0.1em; }
@@ -286,6 +317,11 @@ body.touch #styleFlash { position: absolute; bottom: 170px; left: 0; right: 0; }
   .opt { padding: 1px 8px; }
   .opt .v, #vName { font-size: 14px; }
   #trackInfo { line-height: 1.5; padding-bottom: 2px; }
+  #gBlurb, #garage .hint { display: none; }
+  .g-pick { margin-top: 0; }
+  .vbtn { padding: 5px 9px; }
+  .g-actions { margin-top: 8px; }
+  .g-actions .big-btn { padding: 9px 24px; }
   #challengeBanner { margin-top: 8px; padding: 8px 12px; }
   .big-btn { margin-top: 10px; padding: 10px 26px; font-size: 14px; }
   #results h2 { font-size: 30px; margin-bottom: 6px; }

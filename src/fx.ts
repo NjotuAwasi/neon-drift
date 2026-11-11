@@ -10,7 +10,7 @@ export class Trail {
   private readonly colArr: Float32Array;
   readonly mesh: THREE.Mesh;
 
-  constructor(scene: THREE.Scene, private readonly color: THREE.Color, private readonly max = 60, private readonly width = 0.24) {
+  constructor(scene: THREE.Scene, readonly color: THREE.Color, private readonly max = 60, private readonly width = 0.24) {
     this.posArr = new Float32Array(max * 2 * 3);
     this.colArr = new Float32Array(max * 2 * 3);
     const idx: number[] = [];

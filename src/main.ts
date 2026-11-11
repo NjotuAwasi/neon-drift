@@ -11,10 +11,13 @@ import { readControls, type Controls } from './input';
 import { goFullscreen, initTouch, isTouch } from './touch';
 import { Hud, fmt, ordinal } from './hud';
 import { AudioFx } from './audio';
+import { carById } from './cars';
 import { GhostCar, loadBest, saveBest, type GhostData } from './ghost';
 import { Particles, Trail } from './fx';
 import { drive } from './ai';
-import { Menu, loadSettings } from './menu';
+import { Menu, loadSettings, saveSettings } from './menu';
+import { Garage } from './garage';
+import { makeCockpit, type Cockpit } from './cockpit';
 import { challengeLink, decodeChallenge, shareLink, type Challenge } from './challenge';
 
 const LAPS = 3;
@@ -105,10 +108,19 @@ const racers: Racer[] = [
   player,
 ];
 const car = player.car;
+
+/** Apply the menu's car choice to the player: body, handling, trail and light colours. */
+function applyPlayerCar() {
+  const d = carById(settings.car);
+  car.setDef(d);
+  player.css = `#${new THREE.Color(d.accent).getHexString()}`;
+  player.trails.forEach((t) => t.color.set(d.glow).multiplyScalar(1.6));
+  carLight.color.set(d.glow);
+}
 let field: Racer[] = racers;
 
 // ---------------------------------------------------------------- state
-type State = 'menu' | 'countdown' | 'racing' | 'finished';
+type State = 'menu' | 'garage' | 'countdown' | 'racing' | 'finished';
 let state: State = 'menu';
 const settings = loadSettings();
 let mode: 'race' | 'tt' = settings.mode;
@@ -131,7 +143,7 @@ const style = { total: 0, current: 0, chain: 0, chainTimer: 0, was: false };
 
 const debug = { autopilot: false, autoDrift: false };
 const QUIET: CarEvents = { onBoost() {}, onImpact() {} };
-const IDLE: Controls = { throttle: 0, brake: 0, steer: 0, drift: false, start: false, restart: false, mute: false, back: false, navX: 0, navY: 0 };
+const IDLE: Controls = { throttle: 0, brake: 0, steer: 0, drift: false, start: false, restart: false, mute: false, back: false, camera: false, navX: 0, navY: 0 };
 const TIER_COLORS = [0xf4ecff, 0x22f3ff, 0xff2bd6, 0xffd23f].map((c) => new THREE.Color(c).multiplyScalar(2.5));
 const SPARK = new THREE.Color(0xffc040).multiplyScalar(3);
 
@@ -181,9 +193,29 @@ const menu = new Menu(settings, {
     if (what === 'track') useTrack(settings.track);
     else refreshMenu();
   },
-  start: () => startRace(),
+  start: () => enterGarage(),
   dismiss: () => dismissChallenge(),
 });
+
+// the garage is the step between the menu and the race: pick a car, look at it from every angle
+const garage = new Garage(renderer, {
+  pick(id) {
+    settings.car = id;
+    saveSettings(settings);
+    applyPlayerCar();
+  },
+  go: () => startRace(),
+  back: () => enterMenu(),
+});
+
+function enterGarage() {
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  audio.init();
+  state = 'garage';
+  menu.hide();
+  const label = challenge ? 'ACCEPT CHALLENGE' : settings.mode === 'race' ? 'RACE' : 'TIME TRIAL';
+  garage.show(settings.car, label);
+}
 
 function refreshMenu() {
   if (!def) return;
@@ -201,6 +233,7 @@ initTouch({
   mute: () => audio.toggleMute(),
   restart: () => { if (state !== 'menu') startRace(); },
   menu: () => enterMenu(),
+  cam: () => { if (state !== 'menu' && state !== 'garage') toggleCamera(); },
 });
 
 function setRacerVisible(r: Racer, v: boolean) {
@@ -230,6 +263,7 @@ function placeTimeTrial() {
 
 function enterMenu() {
   state = 'menu';
+  garage.hide();
   field = racers;
   racers.forEach((r) => setRacerVisible(r, true));
   resetGrid();
@@ -268,6 +302,7 @@ function startRace() {
   hud.setChallengeState('none');
 
   menu.hide();
+  garage.hide();
   hud.showRace(mode);
   hud.setLap(1, LAPS);
   hud.setPosition(field.length, field.length);
@@ -543,14 +578,17 @@ function collideCars() {
       if (d2 >= R * R || d2 < 1e-6) continue;
       const d = Math.sqrt(d2);
       const nx = dx / d, nz = dz / d;
-      const push = (R - d) / 2;
-      a.pos.x -= nx * push; a.pos.z -= nz * push;
-      b.pos.x += nx * push; b.pos.z += nz * push;
+      // heavier cars move less and hand out more of the impulse
+      const ma = a.spec.mass, mb = b.spec.mass;
+      const wa = mb / (ma + mb), wb = ma / (ma + mb);
+      const push = R - d;
+      a.pos.x -= nx * push * wa; a.pos.z -= nz * push * wa;
+      b.pos.x += nx * push * wb; b.pos.z += nz * push * wb;
       const rel = (b.vel.x - a.vel.x) * nx + (b.vel.y - a.vel.y) * nz;
       if (rel >= 0) continue;
-      const jImp = (-(1 + 0.35) * rel) / 2;
-      a.vel.x -= nx * jImp; a.vel.y -= nz * jImp;
-      b.vel.x += nx * jImp; b.vel.y += nz * jImp;
+      const jImp = -(1 + 0.35) * rel;
+      a.vel.x -= nx * jImp * wa; a.vel.y -= nz * jImp * wa;
+      b.vel.x += nx * jImp * wb; b.vel.y += nz * jImp * wb;
       if ((field[i].isPlayer || field[j].isPlayer) && -rel > 3) {
         audio.impact(-rel);
         shake = Math.max(shake, Math.min(0.7, -rel * 0.05));
@@ -563,7 +601,71 @@ function collideCars() {
 }
 
 // ---------------------------------------------------------------- camera
+// chase cam (default) or driver's-eye cockpit view; the choice is remembered
+const CAM_KEY = 'neon-drift:camera';
+let camMode: 'chase' | 'driver' = (() => {
+  try { return localStorage.getItem(CAM_KEY) === 'driver' ? 'driver' : 'chase'; } catch { return 'chase'; }
+})();
+const cockpits = new Map<string, Cockpit>();
+const camQuat = new THREE.Quaternion();
+const camEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function cockpit() {
+  const d = carById(settings.car);
+  let ck = cockpits.get(d.id);
+  if (!ck) cockpits.set(d.id, (ck = makeCockpit(d)));
+  return ck;
+}
+
+const inDriverView = () => camMode === 'driver' && (state === 'countdown' || state === 'racing' || state === 'finished');
+
+/** Show the interior (and hide the exterior where it would block the view) only while driving in driver view. */
+function syncCockpit(dt: number) {
+  const ck = cockpit();
+  const root = car.model.root;
+  if (ck.group.parent !== root) root.add(ck.group);
+  const on = inDriverView();
+  ck.group.visible = on;
+  root.children[0].visible = !(on && ck.hideBody); // children[0] is the body group
+  if (on) ck.update(dt, car.speed * 3, car.boost, car.steerVis);
+}
+
+function toggleCamera() {
+  camMode = camMode === 'chase' ? 'driver' : 'chase';
+  try { localStorage.setItem(CAM_KEY, camMode); } catch { /* ignore */ }
+  if (state === 'racing' || state === 'finished') hud.flash(camMode === 'driver' ? 'DRIVER VIEW' : 'CHASE VIEW', 700, 'cyan');
+  snapCamera();
+}
+
+/** Camera at the driver's eye, following the body's heading and a softened share of its pitch/roll. */
+function driverCamera(dt: number) {
+  const ck = cockpit();
+  const root = car.model.root;
+  root.updateMatrixWorld();
+  camera.position.copy(ck.eye);
+  root.localToWorld(camera.position);
+  if (shake > 0.01) {
+    camera.position.x += (Math.random() - 0.5) * shake * 0.15;
+    camera.position.y += (Math.random() - 0.5) * shake * 0.15;
+  }
+  shake *= Math.exp(-5 * dt);
+  // the camera looks down its -z; the car faces +z, hence heading + PI. Slight downward tilt to show the dash;
+  // the head only follows part of the body's pitch/roll so the horizon stays readable.
+  camEuler.set(-root.rotation.x * 0.4 - 0.06, root.rotation.y + Math.PI, -root.rotation.z * 0.25);
+  camQuat.setFromEuler(camEuler);
+  camera.quaternion.copy(camQuat);
+  const sp = THREE.MathUtils.clamp(car.speed / 140, 0, 1);
+  const fov = 70 + sp * 10 + car.boost * 6;
+  camera.fov += (fov - camera.fov) * (1 - Math.exp(-4 * dt));
+  camera.updateProjectionMatrix();
+}
+
 function snapCamera() {
+  if (inDriverView()) {
+    camera.fov = 70;
+    driverCamera(0);
+    return;
+  }
   const h = car.heading;
   fwd.set(Math.sin(h), 0, Math.cos(h));
   camPos.copy(car.pos).addScaledVector(fwd, -10.5).setY(4.2);
@@ -585,6 +687,10 @@ function updateCamera(dt: number) {
     camera.lookAt(car.pos.x, 1.2, car.pos.z);
     camera.fov = 55;
     camera.updateProjectionMatrix();
+    return;
+  }
+  if (inDriverView()) {
+    driverCamera(dt);
     return;
   }
   const h = car.heading;
@@ -640,6 +746,7 @@ function updateEffects(r: Racer) {
 }
 
 // ---------------------------------------------------------------- loop
+applyPlayerCar();
 useTrack(settings.track);
 enterMenu();
 void loadChallengeFromHash();
@@ -656,10 +763,22 @@ function frame(now: number) {
 
   const c = readControls(dt);
   if (c.mute) audio.toggleMute();
+  if (c.camera && state !== 'menu' && state !== 'garage') toggleCamera();
+
+  if (state === 'garage') {
+    if (c.back) enterMenu();
+    else if (c.start) startRace();
+    else {
+      garage.update(dt, c);
+      audio.update(0, 0, false, 0, false);
+      garage.render(dt);
+      return;
+    }
+  }
 
   if (state === 'menu') {
     if (c.navX || c.navY) menu.nav(c.navX, c.navY);
-    if (c.start) startRace();
+    if (c.start) enterGarage();
   } else if (c.back) {
     enterMenu();
   } else if (state === 'countdown') {
@@ -736,9 +855,15 @@ function frame(now: number) {
 
   for (const r of field) updateEffects(r);
   particles.update(dt);
-  carLight.position.set(car.pos.x, 1.2, car.pos.z);
+  if (inDriverView()) {
+    // the car's own light would sit inside the cabin and flood the interior: put it ahead of the nose, low over the road
+    carLight.position.set(car.pos.x + Math.sin(car.heading) * 3.5, 0.4, car.pos.z + Math.cos(car.heading) * 3.5);
+  } else {
+    carLight.position.set(car.pos.x, 1.2, car.pos.z);
+  }
   carLight.intensity = 22 + car.boost * 50;
 
+  syncCockpit(dt);
   updateCamera(dt);
   audio.update(car.speed, live ? (state === 'racing' ? c.throttle : 0.6) : 0, car.drifting, car.boost, live);
 
@@ -754,7 +879,7 @@ requestAnimationFrame(frame);
 
 // debug handle for automated checks
 (window as unknown as { __nd: unknown }).__nd = {
-  car, debug, racers, settings, useTrack, startRace, enterMenu,
+  car, debug, racers, settings, useTrack, startRace, enterMenu, enterGarage, garage,
   get track() { return track; },
   get state() { return state; },
   get mode() { return mode; },
