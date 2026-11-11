@@ -5,7 +5,7 @@ export function isTouch() {
   return matchMedia('(pointer: coarse)').matches;
 }
 
-type Action = 'mute' | 'restart' | 'menu';
+type Action = 'mute' | 'restart' | 'menu' | 'cam';
 
 export function initTouch(actions: Record<Action, () => void>) {
   const enable = () => {

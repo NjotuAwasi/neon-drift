@@ -1,11 +1,13 @@
 import { MEDALS, TRACKS, type TrackDef } from './tracks';
 import { cleanName, type Challenge } from './challenge';
 import { fmt } from './hud';
+import { CARS } from './cars';
 
 export type Mode = 'race' | 'tt';
 export type Diff = 'easy' | 'normal' | 'insane';
 
 export interface Settings {
+  car: string;
   track: string;
   mode: Mode;
   diff: Diff;
@@ -39,9 +41,10 @@ const DIFFS: { id: Diff; label: string }[] = [
 ];
 
 export function loadSettings(): Settings {
-  const s: Settings = { track: TRACKS[0].id, mode: 'race', diff: 'normal', name: 'PLAYER' };
+  const s: Settings = { car: CARS[0].id, track: TRACKS[0].id, mode: 'race', diff: 'normal', name: 'PLAYER' };
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Settings>;
+    if (CARS.some((c) => c.id === raw.car)) s.car = raw.car!;
     if (TRACKS.some((t) => t.id === raw.track)) s.track = raw.track!;
     if (MODES.some((m) => m.id === raw.mode)) s.mode = raw.mode!;
     if (DIFFS.some((d) => d.id === raw.diff)) s.diff = raw.diff!;
@@ -50,7 +53,7 @@ export function loadSettings(): Settings {
   return s;
 }
 
-function saveSettings(s: Settings) {
+export function saveSettings(s: Settings) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 

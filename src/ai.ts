@@ -33,6 +33,7 @@ export function drive(car: Car, track: Track, skill = 1, lane = 0): Controls {
     restart: false,
     mute: false,
     back: false,
+    camera: false,
     navX: 0,
     navY: 0,
   };
