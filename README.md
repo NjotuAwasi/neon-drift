@@ -7,7 +7,7 @@ A synthwave hover-car racer in the browser. Three.js + TypeScript + Vite, fully 
 ## Features
 
 - **Garage**: before every race, pick your car on a 3D turntable. Orbit, zoom and pan freely or jump to preset views (3/4, front, side, rear, top, low)
-- **Two cars**: Neon Wedge (light, agile) or the stainless-gray Tesla Cybertruck (higher top speed, heavier, shoves rivals aside)
+- **Three cars**: Neon Wedge (light, agile), the stainless-gray Tesla Cybertruck (higher top speed, heavier, shoves rivals aside) or the Mercedes Vision AVTR (best grip; rear flaps close under power and open on the brakes to show red)
 - **Two tracks**: Sunset Strip (flowing curves) and Downtown (tight street circuit with a chicane), each with its own city and palette
 - **Race** against 5 AI rivals on Easy / Normal / Insane, or **Time Trial** solo against your best-lap ghost
 - **Drift to boost**: hold drift to charge 3 boost tiers, release to fire
@@ -50,3 +50,11 @@ Issues and pull requests are welcome. Before opening a PR, run `npm run typechec
 ## License
 
 [MIT](LICENSE) © Njotu Awasi
+
+## Credits
+
+The Mercedes Vision AVTR model is not mine:
+
+This work is based on "2020 | Mercedes AVTR Concept | Thanks 100k wiew" (https://sketchfab.com/3d-models/2020-mercedes-avtr-concept-thanks-100k-wiew-690b13f974254b16a1c8ea8d6b92275b) by kevin (ケビン) (https://sketchfab.com/sohyalebret) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+
+The model (with its `license.txt`) lives in `public/models/`. Its rear scale pods are baked into the mesh, so the game overlays animated lids and red emitters on them.

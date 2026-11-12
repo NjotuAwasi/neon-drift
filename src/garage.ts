@@ -191,6 +191,8 @@ export class Garage {
     $('gName').textContent = def.name;
     $('gCount').textContent = `${idx + 1} / ${CARS.length}`;
     $('gBlurb').textContent = def.blurb;
+    $('gCredit').textContent = def.credit ?? '';
+    $('gCredit').classList.toggle('hidden', !def.credit);
     const bar = (label: string, n: number) =>
       `<span class="stat"><b>${label}</b><i>${'<u class="on"></u>'.repeat(n)}${'<u></u>'.repeat(5 - n)}</i></span>`;
     const st = def.stats;
@@ -295,6 +297,8 @@ export class Garage {
       const flicker = 0.4 + Math.random() * 0.12;
       for (const f of this.current.flames) f.scale.z = flicker;
       this.current.underglow.position.y = -this.stand.position.y + 0.2;
+      // showroom demo of the rear flaps: slowly breathe open and shut
+      this.current.animate?.(dt, 0.5 - 0.5 * Math.cos(this.t * 0.9));
     }
   }
 

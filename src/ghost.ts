@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { makeCarModel } from './car';
+import { modelFor, type CarModel } from './car';
+import { CARS, type CarDef } from './cars';
 import type { Track } from './track';
 
 const STEP = 1 / 20; // record at 20 Hz, interpolate on playback
@@ -30,24 +31,41 @@ export class GhostCar {
   private rec: number[] = [];
   private recT = 0;
   private timeAtIdx: Float32Array | null = null;
-  private readonly root: THREE.Group;
+  private root!: THREE.Group;
+  private model!: CarModel;
   private readonly mat: THREE.MeshBasicMaterial;
+  private carId = '';
+  private tick = 0;
 
-  constructor(scene: THREE.Scene) {
-    const m = makeCarModel(0x22f3ff, 0x22f3ff);
+  constructor(private readonly scene: THREE.Scene) {
     this.mat = new THREE.MeshBasicMaterial({
       transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     });
     this.setColor(0x22f3ff);
-    m.root.traverse((o) => {
-      if (o instanceof THREE.Mesh && o !== m.underglow) o.material = this.mat;
-    });
+    this.setCar(CARS[0]);
+  }
+
+  /** Show the ghost as the same body as the player's car (rebuilt only when the car changes). */
+  setCar(def: CarDef) {
+    if (def.id === this.carId) return;
+    this.carId = def.id;
+    if (this.model) this.scene.remove(this.root);
+    const m = modelFor({ ...def, accent: 0x22f3ff, glow: 0x22f3ff });
     m.underglow.visible = false;
     for (const f of m.flames) f.scale.set(1, 1, 0.8);
     m.root.rotation.order = 'YXZ';
     m.root.visible = false;
+    this.model = m;
     this.root = m.root;
-    scene.add(this.root);
+    this.applyMaterial();
+    this.scene.add(this.root);
+  }
+
+  /** Flatten every mesh to the translucent ghost material (also catches parts of async-loaded models). */
+  private applyMaterial() {
+    this.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o !== this.model.underglow && o.material !== this.mat) o.material = this.mat;
+    });
   }
 
   setColor(hex: number) {
@@ -119,6 +137,7 @@ export class GhostCar {
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     const h = f[o + 2] + dh * a;
     const roll = f[o + 3] + (f[p + 3] - f[o + 3]) * a;
+    if (++this.tick % 20 === 0) this.applyMaterial();
     this.root.visible = true;
     this.root.position.set(x, 0.75, z);
     this.root.rotation.set(0, h, roll);
