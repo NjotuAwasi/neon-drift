@@ -79,11 +79,11 @@ interface Racer {
 }
 
 const RIVALS = [
-  { name: 'VEGA', accent: 0xffa21f, glow: 0xffd23f, skill: 0.985, lane: -3, pads: true },
-  { name: 'NOVA', accent: 0x3dff8b, glow: 0x9dffcf, skill: 0.96, lane: 3.5, pads: false },
-  { name: 'RAZOR', accent: 0xff3b3b, glow: 0xff8a5c, skill: 0.94, lane: -1, pads: true },
-  { name: 'LUXE', accent: 0xb46bff, glow: 0xe3b8ff, skill: 0.92, lane: 4, pads: false },
-  { name: 'KAI', accent: 0x6fb8ff, glow: 0xf4ecff, skill: 0.89, lane: -4.5, pads: true },
+  { name: 'VEGA', accent: 0xffa21f, glow: 0xffd23f, skill: 0.985, lane: -3, pads: true, body: 'cybertruck' },
+  { name: 'NOVA', accent: 0x3dff8b, glow: 0x9dffcf, skill: 0.96, lane: 3.5, pads: false, body: 'avtr' },
+  { name: 'RAZOR', accent: 0xff3b3b, glow: 0xff8a5c, skill: 0.94, lane: -1, pads: true, body: 'cybertruck' },
+  { name: 'LUXE', accent: 0xb46bff, glow: 0xe3b8ff, skill: 0.92, lane: 4, pads: false, body: 'avtr' },
+  { name: 'KAI', accent: 0x6fb8ff, glow: 0xf4ecff, skill: 0.89, lane: -4.5, pads: true, body: 'cybertruck' },
 ];
 // two-wide grid (distance past the line in world units); player starts at the back
 const GRID = [
@@ -91,8 +91,13 @@ const GRID = [
   { d: 35, lat: 4 }, { d: 24, lat: -4 }, { d: 16, lat: 4 },
 ];
 
-function makeRacer(name: string, accent: number, glow: number, isPlayer: boolean, skill = 1, lane = 0, seeksPads = false): Racer {
+function makeRacer(name: string, accent: number, glow: number, isPlayer: boolean, skill = 1, lane = 0, seeksPads = false, body?: string): Racer {
   const car = new Car(scene, accent, glow);
+  if (body) {
+    // rivals drive the Cybertruck or the AVTR body in their own colours, with the default handling
+    const base = carById(body);
+    car.setBody({ ...base, glow, accent: base.body === 'avtr' ? base.accent : accent });
+  }
   const tc = new THREE.Color(glow).multiplyScalar(isPlayer ? 1.6 : 1.1);
   const n = isPlayer ? 40 : 26;
   return {
@@ -104,7 +109,7 @@ function makeRacer(name: string, accent: number, glow: number, isPlayer: boolean
 
 const player = makeRacer('YOU', 0xff2bd6, 0x22f3ff, true);
 const racers: Racer[] = [
-  ...RIVALS.map((r) => makeRacer(r.name, r.accent, r.glow, false, r.skill, r.lane, r.pads)),
+  ...RIVALS.map((r) => makeRacer(r.name, r.accent, r.glow, false, r.skill, r.lane, r.pads, r.body)),
   player,
 ];
 const car = player.car;
@@ -113,6 +118,7 @@ const car = player.car;
 function applyPlayerCar() {
   const d = carById(settings.car);
   car.setDef(d);
+  ghost.setCar(d);
   player.css = `#${new THREE.Color(d.accent).getHexString()}`;
   player.trails.forEach((t) => t.color.set(d.glow).multiplyScalar(1.6));
   carLight.color.set(d.glow);

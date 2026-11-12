@@ -496,8 +496,24 @@ function wedgeCockpit(def: CarDef): Cockpit {
   };
 }
 
+/** The wedge's single-seat layout moved into the AVTR's bubble, plus a simple hood (the real body is hidden inside). */
+function avtrCockpit(def: CarDef): Cockpit {
+  const c = wedgeCockpit(def);
+  const shift = new THREE.Vector3(0, 0.08, 0.35);
+  c.group.position.copy(shift);
+  c.eye.add(shift);
+  const hood = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 32, 16),
+    new THREE.MeshStandardMaterial({ color: 0x9aa0aa, metalness: 0.6, roughness: 0.35, emissive: 0x2a2c3c }),
+  );
+  hood.scale.set(1.0, 0.42, 1.5);
+  hood.position.set(0, 0.55, 1.7).sub(shift);
+  c.group.add(hood);
+  return { ...c, hideBody: true };
+}
+
 export function makeCockpit(def: CarDef): Cockpit {
-  const c = def.body === 'truck' ? truckCockpit(def) : wedgeCockpit(def);
+  const c = def.body === 'truck' ? truckCockpit(def) : def.body === 'avtr' ? avtrCockpit(def) : wedgeCockpit(def);
   c.group.visible = false;
   return c;
 }

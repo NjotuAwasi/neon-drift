@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ROAD_HALF, Track } from './track';
 import type { Controls } from './input';
 import { DEFAULT_SPEC, type CarDef, type CarSpec } from './cars';
@@ -12,6 +13,8 @@ export interface CarModel {
   wheels?: THREE.Object3D[];
   /** how much the flames widen at full boost (a wide bar flame must not outgrow the body) */
   flameGrowX?: number;
+  /** per-frame body animation; `open` 0..1 = how far the rear flaps are raised (brake / lift-off) */
+  animate?(dt: number, open: number): void;
 }
 
 function glowTexture() {
@@ -365,10 +368,254 @@ export function makeTruckModel(accent: number, glowColor: number, paintColor: nu
   return { root, flames, underglow, thrusterLocal, wheels, flameGrowX: 0.05 };
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Mercedes Vision AVTR: glTF model "2020 | Mercedes AVTR Concept | Thanks 100k wiew" by kevin,
+// CC-BY-4.0 (credit text in cars.ts). The rear scale pods are baked into the mesh, so each pod gets an
+// overlay lid (hinged at its front edge) plus a red emitter; lids lie shut under power and flare on the brakes.
+// ---------------------------------------------------------------------------------------------------------
+const AVTR_URL = `${import.meta.env.BASE_URL}models/2020__mercedes_avtr_concept__thanks_100k_wiew/scene.gltf`;
+const AVTR_LEN = 5.3;                       // game units, nose to tail
+const AVTR_SRC = { zMin: -2.2, zMax: 1.8 }; // model extent along the car (model units, +z = nose)
+const AVTR_SCALE = AVTR_LEN / (AVTR_SRC.zMax - AVTR_SRC.zMin);
+/** model-space offset that centres the car on z and lifts its underside to y ~ 0.15 */
+const AVTR_OFFSET = new THREE.Vector3(0, 0.15 / AVTR_SCALE + 0.01, -(AVTR_SRC.zMax + AVTR_SRC.zMin) / 2);
+const AVTR_WHEELS = [
+  { name: 'wheel0', c: new THREE.Vector3(0.675, 0.31, 1.25), rims: ['avtr_rim', 'avtr_rim.004', 'avtr_rim.005'] },
+  { name: 'wheel1', c: new THREE.Vector3(-0.675, 0.31, 1.25), rims: ['avtr_rim.003', 'avtr_rim.010', 'avtr_rim.011'] },
+  { name: 'wheel2', c: new THREE.Vector3(0.675, 0.31, -1.51), rims: ['avtr_rim.001', 'avtr_rim.006', 'avtr_rim.007'] },
+  { name: 'wheel3', c: new THREE.Vector3(-0.675, 0.31, -1.51), rims: ['avtr_rim.002', 'avtr_rim.008', 'avtr_rim.009'] },
+];
+
+interface AvtrPod { p: THREE.Vector3; n: THREE.Vector3; w: number; l: number; rank: number }
+interface AvtrAsset { scene: THREE.Group; pods: AvtrPod[] }
+
+/** Split a mesh into connected pieces (vertices welded by position); returns each piece's world-space bounds. */
+function meshPieces(mesh: THREE.Mesh) {
+  const geo = mesh.geometry as THREE.BufferGeometry;
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  const ids = new Map<string, number>();
+  const parent: number[] = [];
+  const find = (a: number): number => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const v = new THREE.Vector3();
+  const world: THREE.Vector3[] = [];
+  const vid: number[] = [];
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+    const key = `${Math.round(v.x * 500)},${Math.round(v.y * 500)},${Math.round(v.z * 500)}`;
+    let id = ids.get(key);
+    if (id === undefined) { id = parent.length; parent.push(id); ids.set(key, id); world.push(v.clone()); }
+    vid.push(id);
+  }
+  const tri = idx ? idx.count : pos.count;
+  for (let i = 0; i < tri; i += 3) {
+    const a = find(vid[idx ? idx.getX(i) : i]);
+    for (let k = 1; k < 3; k++) {
+      const b = find(vid[idx ? idx.getX(i + k) : i + k]);
+      if (a !== b) parent[b] = a;
+    }
+  }
+  const boxes = new Map<number, THREE.Box3>();
+  world.forEach((p, i) => {
+    const r = find(i);
+    let b = boxes.get(r);
+    if (!b) boxes.set(r, (b = new THREE.Box3()));
+    b.expandByPoint(p);
+  });
+  return [...boxes.values()];
+}
+
+function prepareAvtr(scene: THREE.Group): AvtrAsset {
+  scene.updateMatrixWorld(true);
+  const meshes: THREE.Mesh[] = [];
+  scene.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
+  const matName = (m: THREE.Mesh) => (m.material as THREE.Material).name;
+
+  // ---- materials: keep the model's own look but tame it for the game's neon lighting
+  for (const m of meshes) {
+    const mat = m.material as THREE.MeshStandardMaterial;
+    const n = mat.name;
+    mat.envMapIntensity = 0.55;
+    if (n.startsWith('avtr_glass')) {
+      mat.transparent = true; mat.depthWrite = false; mat.envMapIntensity = 1; mat.roughness = 0.05;
+    } else if (n === 'avtr_left_front_light') {
+      mat.emissiveIntensity = 2.6; mat.toneMapped = false;
+    } else if (n === 'avtr_chrome') {
+      mat.envMapIntensity = 0.9;
+    }
+  }
+
+  // ---- rear pods: one connected piece of the pink "secondary" mesh each
+  const pods: AvtrPod[] = [];
+  const sec = meshes.find((m) => matName(m) === 'avtr_secondary');
+  if (sec) {
+    const targets = meshes.filter((m) => !/glass|secondary|rear_light|taillight/.test(matName(m)));
+    // the blue "left_front_light" mesh also contains the pods' side slivers: drop those triangles (keep wheels, nose, logo)
+    const blue = meshes.find((m) => matName(m) === 'avtr_left_front_light' && m.geometry.attributes.position.count > 10000);
+    if (blue) {
+      const g = blue.geometry as THREE.BufferGeometry;
+      const pa = g.attributes.position, ix = g.index!;
+      const keep: number[] = [];
+      const v = new THREE.Vector3();
+      for (let i = 0; i < ix.count; i += 3) {
+        v.set(0, 0, 0);
+        for (let k = 0; k < 3; k++) v.add(new THREE.Vector3().fromBufferAttribute(pa, ix.getX(i + k)));
+        v.multiplyScalar(1 / 3).applyMatrix4(blue.matrixWorld);
+        if (!(v.z < -0.4 && v.z > -1.97 && v.y > 0.55)) keep.push(ix.getX(i), ix.getX(i + 1), ix.getX(i + 2));
+      }
+      g.setIndex(keep);
+    }
+    const ray = new THREE.Raycaster();
+    const down = new THREE.Vector3(0, -1, 0);
+    // each piece is just the pod's -x side wall (a flat hexagon edge, half the pod's length): rebuild the pod from it
+    for (const b of meshPieces(sec)) {
+      const c = b.getCenter(new THREE.Vector3());
+      const sz = b.getSize(new THREE.Vector3());
+      if (c.z > -0.45 || Math.abs(c.x) > 0.42 || sz.z < 0.03 || sz.z > 0.3) continue; // rear deck only
+      const l = sz.z * 1.5, w = l * 0.6;
+      const cx = c.x, cz = b.min.z + l * 0.28;
+      ray.set(new THREE.Vector3(cx, 3, cz), down);
+      const hit = ray.intersectObjects(targets, false)[0];
+      if (!hit || !hit.face) continue;
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      if (n.y < 0.3) continue;
+      pods.push({ p: hit.point.clone(), n, w, l, rank: 0 });
+    }
+    const zs = pods.map((p) => p.p.z);
+    const zHi = Math.max(...zs), zLo = Math.min(...zs);
+    for (const p of pods) p.rank = (zHi - p.p.z) / Math.max(1e-3, zHi - zLo); // front rows first
+  }
+
+  // ---- wheels: re-parent each wheel's rim nodes under a pivot at its centre so they spin around the axle (x)
+  for (const w of AVTR_WHEELS) {
+    const pivot = new THREE.Group();
+    pivot.name = w.name;
+    pivot.position.copy(w.c);
+    scene.add(pivot);
+    pivot.updateMatrixWorld(true);
+    for (const name of w.rims) {
+      // GLTFLoader strips '.' from node names ("avtr_rim.001" -> "avtr_rim001")
+      const node = scene.getObjectByName(name.replace(/\./g, ''));
+      if (node) pivot.attach(node);
+    }
+  }
+  return { scene, pods };
+}
+
+let avtrLoad: Promise<AvtrAsset | null> | null = null;
+/** Load (once) and prepare the glTF; resolves null if it can't be loaded. */
+export function loadAvtr(): Promise<AvtrAsset | null> {
+  avtrLoad ??= new GLTFLoader().loadAsync(AVTR_URL)
+    .then((g) => prepareAvtr(g.scene))
+    .catch((e) => { console.warn('AVTR model failed to load', e); return null; });
+  return avtrLoad;
+}
+
+/**
+ * Bionic concept pod. Returns immediately; the glTF is attached into the body group once loaded.
+ * Nitro leaves through a full-width bar like the Cybertruck's.
+ */
+export function makeAvtrModel(accent: number, glowColor: number, _paintColor: number): CarModel {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body); // root.children[0] must stay the body group (driver view hides it)
+
+  const flames: THREE.Mesh[] = [];
+  const thrusterLocal: THREE.Vector3[] = [];
+  addThrusterBar(body, glowColor, -2.55, 0.42, 1.3, flames, thrusterLocal);
+  addHoverPads(body, glowColor, 0.7, 1.6);
+  const underglow = makeUnderglow(glowColor, 5.5, 8.5);
+  root.add(underglow);
+
+  const model: CarModel = { root, flames, underglow, thrusterLocal, wheels: [], flameGrowX: 0.05 };
+
+  const redOff = new THREE.Color(0x0c0c12);
+  const redOn = new THREE.Color(accent).multiplyScalar(3);
+  let open = 0;
+  let apply: ((open: number) => void) | null = null;
+  model.animate = (_dt, o) => { open = o; apply?.(o); };
+
+  void loadAvtr().then((asset) => {
+    if (!asset) return;
+    const fit = new THREE.Group();
+    fit.scale.setScalar(AVTR_SCALE);
+    fit.position.copy(AVTR_OFFSET).multiplyScalar(AVTR_SCALE);
+    const car = asset.scene.clone(true);
+    // per-instance copies of the materials that animate with the flaps
+    const lit: THREE.MeshStandardMaterial[] = [];
+    let primary: THREE.Material | null = null;
+    car.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mat = m.material as THREE.MeshStandardMaterial;
+      if (mat.name === 'avtr_primary') primary = mat;
+      if (mat.name === 'avtr_secondary' || mat.name === 'avtr_right_rear_light') {
+        m.material = mat.clone();
+        lit.push(m.material as THREE.MeshStandardMaterial);
+      }
+    });
+    fit.add(car);
+    body.add(fit);
+
+    // lids + red emitters over each pod
+    const emit = new THREE.MeshBasicMaterial({ color: redOff.clone(), toneMapped: false });
+    const lidMat = primary ?? new THREE.MeshStandardMaterial({ color: 0x9aa0aa, metalness: 0.7, roughness: 0.3 });
+    const hex = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
+    const lids: { hinge: THREE.Object3D; rank: number }[] = [];
+    for (const pod of asset.pods) {
+      const lw = pod.w / 0.866 * 1.04, ll = pod.l * 1.04;
+      const anchor = new THREE.Group();
+      anchor.position.copy(pod.p).addScaledVector(pod.n, 0.004);
+      anchor.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pod.n);
+      const disc = new THREE.Mesh(hex, emit);
+      disc.scale.set(lw * 0.92, 0.004, ll * 0.92);
+      anchor.add(disc);
+      const hinge = new THREE.Group();
+      hinge.position.z = ll / 2; // hinge on the front (nose side) edge
+      const lid = new THREE.Mesh(hex, lidMat);
+      lid.scale.set(lw, 0.012, ll);
+      lid.position.set(0, 0.012, -ll / 2);
+      hinge.add(lid);
+      anchor.add(hinge);
+      car.add(anchor);
+      lids.push({ hinge, rank: pod.rank });
+    }
+
+    // wheels (pivots live in the cloned scene)
+    for (const w of AVTR_WHEELS) {
+      const p = car.getObjectByName(w.name);
+      if (p) model.wheels!.push(p);
+    }
+
+    let shown = -1;
+    apply = (o) => {
+      if (Math.abs(o - shown) < 1e-3) return;
+      shown = o;
+      const k = o * o;
+      emit.color.copy(redOff).lerp(redOn, k);
+      for (const m of lit) {
+        const rear = m.name === 'avtr_right_rear_light';
+        m.color.set(0x0c0c12);
+        m.emissive.set(accent).multiplyScalar(k * (rear ? 3 : 2.5));
+        m.emissiveIntensity = 1;
+        m.toneMapped = false;
+        if (rear) { m.transparent = true; m.opacity = Math.min(1, o * 1.6); m.depthWrite = false; }
+      }
+      for (const l of lids) {
+        const local = THREE.MathUtils.smoothstep(o * 1.5 - l.rank * 0.5, 0, 1);
+        l.hinge.rotation.x = local * 1.05;
+      }
+    };
+    apply(open);
+  });
+
+  return model;
+}
+
 export function modelFor(def: CarDef): CarModel {
-  return def.body === 'truck'
-    ? makeTruckModel(def.accent, def.glow, def.paint)
-    : makeCarModel(def.accent, def.glow, def.paint);
+  if (def.body === 'truck') return makeTruckModel(def.accent, def.glow, def.paint);
+  if (def.body === 'avtr') return makeAvtrModel(def.accent, def.glow, def.paint);
+  return makeCarModel(def.accent, def.glow, def.paint);
 }
 
 export interface CarEvents {
@@ -395,6 +642,8 @@ export class Car {
   steerVis = 0;
   /** sideways slip speed (u/s), used for drift scoring */
   lateral = 0;
+  /** smoothed 0..1: rear flaps raised (braking / lifting off), 0 under power */
+  brakeOpen = 0;
   private roll = 0;
   private pitch = 0;
   private prevVf = 0;
@@ -417,6 +666,24 @@ export class Car {
       this.models.set(def.id, m);
     }
     this.spec = def.spec;
+    if (m === this.model) return;
+    const visible = this.model.root.visible;
+    this.scene.remove(this.model.root);
+    this.model = m;
+    m.root.visible = visible;
+    this.scene.add(m.root);
+    this.syncModel(0);
+  }
+
+  /** Swap only the body (rivals keep the default handling); models are cached per id + colours. */
+  setBody(def: CarDef) {
+    const key = `${def.id}:${def.accent}:${def.glow}`;
+    let m = this.models.get(key);
+    if (!m) {
+      m = modelFor(def);
+      m.root.rotation.order = 'YXZ';
+      this.models.set(key, m);
+    }
     if (m === this.model) return;
     const visible = this.model.root.visible;
     this.scene.remove(this.model.root);
@@ -453,6 +720,7 @@ export class Car {
     this.driftCharge = 0;
     this.boostTime = 0;
     this.boost = 0;
+    this.brakeOpen = 0;
     this.prevVf = 0;
     this.syncModel(0);
   }
@@ -538,6 +806,9 @@ export class Car {
     this.boostTime = Math.max(0, this.boostTime - dt);
     this.boost = THREE.MathUtils.lerp(this.boost, boosting ? 1 : 0, 1 - Math.exp(-6 * dt));
     this.throttle = c.throttle;
+    // flaps: shut under power / boost, flared on the brakes, half-open while coasting down
+    const openTarget = c.brake > 0 && vf > 1 ? 1 : c.throttle > 0 || boosting ? 0 : vf > 5 ? 0.6 : 0;
+    this.brakeOpen = THREE.MathUtils.lerp(this.brakeOpen, openTarget, 1 - Math.exp(-(openTarget > this.brakeOpen ? 14 : 7) * dt));
 
     const accel = (vf - this.prevVf) / Math.max(dt, 1e-4);
     this.prevVf = vf;
@@ -559,6 +830,7 @@ export class Car {
     for (const f of m.flames) {
       f.scale.set(1 + this.boost * (m.flameGrowX ?? 0.4), 1 + this.boost * 0.4, len);
     }
+    m.animate?.(dt, this.brakeOpen);
     if (m.wheels) for (const w of m.wheels) w.rotation.x += this.forwardSpeed * dt / 0.43;
   }
 }

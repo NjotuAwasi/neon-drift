@@ -15,14 +15,18 @@ export interface CarDef {
   id: string;
   name: string;
   blurb: string;
-  body: 'wedge' | 'truck';
+  body: 'wedge' | 'truck' | 'avtr';
   paint: number;
   accent: number; // neon strips + tail light
   glow: number;   // thrusters, underglow, trails
   spec: CarSpec;
+  /** attribution shown in the garage (required by the 3D model's licence) */
+  credit?: string;
   /** 1..5 bars shown in the menu */
   stats: { speed: number; accel: number; grip: number; mass: number };
 }
+
+export const AVTR_CREDIT = 'This work is based on "2020 | Mercedes AVTR Concept | Thanks 100k wiew" (https://sketchfab.com/3d-models/2020-mercedes-avtr-concept-thanks-100k-wiew-690b13f974254b16a1c8ea8d6b92275b) by kevin (ケビン) (https://sketchfab.com/sohyalebret) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)';
 
 export const DEFAULT_SPEC: CarSpec = {
   maxV: 96, boostV: 140, acc: 64, boostAcc: 120, turn: 1.85, driftTurn: 2.35, grip: 9, driftGrip: 1.5, mass: 1,
@@ -50,6 +54,18 @@ export const CARS: CarDef[] = [
     glow: 0x8fb8ff,
     spec: { ...DEFAULT_SPEC, maxV: 101, boostV: 146, acc: 55, boostAcc: 110, turn: 1.72, driftTurn: 2.2, grip: 10, driftGrip: 1.3, mass: 1.7 },
     stats: { speed: 4, accel: 3, grip: 3, mass: 5 },
+  },
+  {
+    id: 'avtr',
+    name: 'MERCEDES VISION AVTR',
+    blurb: 'Bionic concept hover-pod. Razor grip and a bar thruster; its rear flaps seal shut under power and flare open on the brakes to show red.',
+    body: 'avtr',
+    credit: AVTR_CREDIT,
+    paint: 0xd9dbe8,
+    accent: 0xff2a3c,
+    glow: 0x3ab8ff,
+    spec: { ...DEFAULT_SPEC, maxV: 98, boostV: 142, acc: 62, boostAcc: 118, turn: 1.95, driftTurn: 2.45, grip: 11, driftGrip: 1.6, mass: 1.1 },
+    stats: { speed: 3, accel: 4, grip: 5, mass: 2 },
   },
 ];
 
